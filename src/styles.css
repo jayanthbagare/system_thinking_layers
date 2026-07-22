@@ -37,18 +37,35 @@ body {
 /* Edges */
 .edge-line {
   stroke: var(--c-edge);
-  stroke-width: 1.5;
+  stroke-width: 2;
   fill: none;
 }
 .edge-arrow {
-  fill: var(--c-edge);
+  stroke: var(--c-edge);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+.edge-polarity-bg {
+  fill: var(--c-bg);
+  stroke: var(--c-edge);
+  stroke-width: 1.25;
 }
 .edge-polarity {
   font-size: 13px;
-  font-weight: 600;
-  fill: var(--c-edge);
+  font-weight: 700;
+  fill: var(--c-text);
   text-anchor: middle;
+  dominant-baseline: central;
   user-select: none;
+  pointer-events: none;
+}
+.edge-polarity[data-polarity="+"] {
+  fill: var(--c-reinforcing);
+}
+.edge-polarity[data-polarity="-"] {
+  fill: var(--c-balancing);
 }
 .edge-hash line {
   stroke: var(--c-delay);
@@ -70,9 +87,30 @@ body {
   font-size: 12px;
   fill: var(--c-text);
   user-select: none;
+  pointer-events: none;
 }
 .node.is-pinned .node-circle {
   stroke-width: 3;
+}
+/* Inner value circle — loopy-style: radius encodes the node's live value. */
+.node-value-circle {
+  fill: var(--c-delay);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.node {
+  cursor: pointer;
+}
+
+/* Traveling signal pulses (loopy-style propagation). */
+.signal {
+  fill: var(--c-delay);
+  stroke: #fff;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.signal[data-sign="neg"] {
+  fill: var(--c-balancing);
 }
 
 /* Loop labels */
@@ -101,7 +139,10 @@ body {
   stroke-width: 3;
 }
 .edge.is-highlighted .edge-arrow {
-  fill: var(--c-delay);
+  stroke: var(--c-delay);
+}
+.edge.is-highlighted .edge-polarity-bg {
+  stroke: var(--c-delay);
 }
 .loop-label.is-highlighted .loop-label-text {
   text-decoration: underline;
@@ -537,6 +578,45 @@ body {
 }
 .io-bar button:hover {
   background: #f0f0f0;
+}
+
+/* ---------- Play controls (loopy-style simulation) ---------- */
+.play-bar {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.play-bar button {
+  border: none;
+  background: transparent;
+  color: #555;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.play-bar button:hover {
+  background: #eee;
+}
+.play-bar button.is-active {
+  background: var(--c-delay);
+  color: #fff;
+}
+.play-bar .play-hint {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #999;
+  align-self: center;
 }
 
 /* ---------- Accessibility ---------- */

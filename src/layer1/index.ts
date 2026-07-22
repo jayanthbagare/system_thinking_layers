@@ -12,6 +12,17 @@ export {
   loopLabel,
   polaritySymbol,
   shortenToCircleBounds,
+  arrowHead,
+  valueRadiusFraction,
   type EdgeGeometry,
   type Point,
 } from "./layout";
+export {
+  NUDGE_DELTA,
+  initialLoopyState,
+  nudge as nudgeLoopy,
+  resetLoopyState,
+  step as stepLoopy,
+  type LoopyState,
+  type Signal,
+} from "./signal";

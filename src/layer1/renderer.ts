@@ -18,13 +18,14 @@
  *   - hover/select highlight that isolates a single loop's edges/nodes.
  */
 
-import { select, type Selection } from "d3-selection";
+import { select, pointer, type Selection } from "d3-selection";
 import { forceSimulation, forceLink, forceManyBody, forceCenter, type Simulation } from "d3-force";
 import { drag } from "d3-drag";
 import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
 import type { Edge, Graph, Loop } from "@/model/types";
 import { deriveLoops, type DerivedLoops } from "@/graph/loops";
 import {
+  arrowHead,
   delayBadge,
   delayHashMarksDouble,
   edgeGeometry,
@@ -35,8 +36,17 @@ import {
   loopLabel,
   polaritySymbol,
   shortenToCircleBounds,
+  valueRadiusFraction,
   type Point,
 } from "./layout";
+import {
+  NUDGE_DELTA,
+  initialLoopyState,
+  nudge as nudgeState,
+  step as stepLoopy,
+  type LoopyState,
+  type Signal,
+} from "./signal";
 
 /** A node as consumed by the simulation — model node + transient layout state. */
 export interface SimNode {
@@ -61,6 +71,9 @@ export interface SimEdge {
 }
 
 const NODE_RADIUS = 22;
+const ARROW_SIZE = 12; // chevron wing length (px) — loopy-style prominent head
+const POLARITY_BADGE_R = 11; // radius of the polarity badge at edge midpoint
+const SIGNAL_SPEED = 0.035; // fraction of edge per animation frame (loopy-like)
 const HIGHLIGHTED_CLASS = "is-highlighted";
 const DIMMED_CLASS = "is-dimmed";
 
@@ -77,6 +90,7 @@ export class Layer1Renderer {
   private readonly svg: Selection<SVGSVGElement, unknown, null, unknown>;
   private readonly root: Selection<SVGGElement, unknown, null, unknown>;
   private readonly linkLayer: Selection<SVGGElement, unknown, null, unknown>;
+  private readonly signalLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly nodeLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly labelLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly zoomBehavior: ZoomBehavior<SVGSVGElement, unknown>;
@@ -91,6 +105,11 @@ export class Layer1Renderer {
   private heat: Map<string, number> | null = null;
   private readonly opts: RendererOptions;
 
+  /** Loopy-style signal simulation state (view-layer animation only). */
+  private loopy: LoopyState | null = null;
+  private playing = true;
+  private rafId: number | null = null;
+
   constructor(svg: SVGSVGElement, opts: RendererOptions) {
     this.opts = opts;
     this.svg = select(svg);
@@ -99,6 +118,7 @@ export class Layer1Renderer {
     // A single zoomable group holds all layers so pan/zoom is unified.
     this.root = this.svg.append("g").attr("class", "layer1-root");
     this.linkLayer = this.root.append("g").attr("class", "layer1-links");
+    this.signalLayer = this.root.append("g").attr("class", "layer1-signals");
     this.labelLayer = this.root.append("g").attr("class", "layer1-loop-labels");
     this.nodeLayer = this.root.append("g").attr("class", "layer1-nodes");
 
@@ -121,10 +141,12 @@ export class Layer1Renderer {
     this.graph = graph;
     this.derived = deriveLoops(graph);
     this.activeLoopId = null;
+    this.loopy = initialLoopyState(graph);
     this.buildSimNodes();
     this.buildSimEdges();
     this.startSimulation();
     this.draw();
+    this.startLoopyLoop();
   }
 
   /** Update only the loops (e.g. after an edit that changes edges). */
@@ -156,9 +178,98 @@ export class Layer1Renderer {
 
   /** Tear down: stop the simulation and remove DOM listeners. */
   destroy(): void {
+    this.stopLoopyLoop();
     this.sim?.stop();
     this.svg.on(".zoom", null);
     this.root.remove();
+  }
+
+  /** Start (or resume) the loopy-style signal animation. */
+  play(): void {
+    this.playing = true;
+    this.startLoopyLoop();
+  }
+
+  /** Pause the signal animation. */
+  pause(): void {
+    this.playing = false;
+    this.stopLoopyLoop();
+  }
+
+  /** Reset all node values to rest and clear traveling signals. */
+  resetLoopy(): void {
+    if (!this.graph) return;
+    this.loopy = initialLoopyState(this.graph);
+    this.drawSignals();
+    this.styleNodeValues();
+  }
+
+  isPlaying(): boolean {
+    return this.playing;
+  }
+
+  // --- loopy signal animation ------------------------------------------
+
+  private startLoopyLoop(): void {
+    if (this.rafId !== null) return;
+    if (!this.graph || !this.loopy) return;
+    const tick = (): void => {
+      if (!this.playing || !this.graph || !this.loopy) return;
+      this.loopy = stepLoopy(this.loopy, this.graph, SIGNAL_SPEED);
+      this.drawSignals();
+      this.styleNodeValues();
+      this.rafId = requestAnimationFrame(tick);
+    };
+    this.rafId = requestAnimationFrame(tick);
+  }
+
+  private stopLoopyLoop(): void {
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+  }
+
+  /** Render the traveling pulses as small dots along each edge. */
+  private drawSignals(): void {
+    if (!this.loopy) return;
+    const edgeById = new Map(this.simEdges.map((e) => [e.id, e]));
+    this.signalLayer.selectAll("*").remove();
+    if (this.loopy.signals.length === 0) return;
+    const dots = this.signalLayer
+      .selectAll<SVGCircleElement, Signal>("circle.signal")
+      .data(this.loopy.signals)
+      .enter()
+      .append("circle")
+      .attr("class", "signal")
+      .attr("r", 5);
+    dots.each((d, i, groups) => {
+      const e = edgeById.get(d.edgeId);
+      const el = groups[i];
+      if (!e) {
+        el.setAttribute("visibility", "hidden");
+        return;
+      }
+      el.setAttribute("visibility", "visible");
+      const sx = e.source.x + (e.target.x - e.source.x) * d.position;
+      const sy = e.source.y + (e.target.y - e.source.y) * d.position;
+      el.setAttribute("cx", String(sx));
+      el.setAttribute("cy", String(sy));
+      el.setAttribute("data-sign", d.delta >= 0 ? "pos" : "neg");
+    });
+  }
+
+  /** Size each node's inner value circle from its loopy value (loopy-style). */
+  private styleNodeValues(): void {
+    if (!this.loopy) return;
+    this.nodeLayer
+      .selectAll<SVGGElement, SimNode>("g.node")
+      .each((d, i, groups) => {
+        const v = this.loopy?.values.get(d.id) ?? 0.5;
+        const frac = valueRadiusFraction(v);
+        const circle = select(groups[i]).select(".node-value-circle");
+        circle.attr("r", NODE_RADIUS * frac);
+      });
   }
 
   // --- internals ---------------------------------------------------------
@@ -249,6 +360,7 @@ export class Layer1Renderer {
 
     enter.append("path").attr("class", "edge-line");
     enter.append("path").attr("class", "edge-arrow");
+    enter.append("circle").attr("class", "edge-polarity-bg");
     enter.append("text").attr("class", "edge-polarity");
     enter.append("g").attr("class", "edge-hash");
     enter.append("text").attr("class", "edge-delay-badge");
@@ -266,19 +378,31 @@ export class Layer1Renderer {
     );
     const geom = edgeGeometry(source, target);
     const g = select(el);
-    g.select(".edge-line").attr("d", geom.path);
-    // Arrowhead: a small triangle at the target end, oriented along the edge.
-    const ax = source.x + geom.direction.x * (geom.length - 6);
-    const ay = source.y + geom.direction.y * (geom.length - 6);
-    const perp = { x: -geom.direction.y, y: geom.direction.x };
-    const arrow = `M${ax + perp.x * 4},${ay + perp.y * 4} L${ax + geom.direction.x * 8},${
-      ay + geom.direction.y * 8
-    } L${ax - perp.x * 4},${ay - perp.y * 4} Z`;
-    g.select(".edge-arrow").attr("d", arrow);
+    // Edge line weight scales with strength so influence reads at a glance
+    // (loopy: lineWidth = 4*|strength|-2). Floor at 1.5 for visibility.
+    g.select(".edge-line")
+      .attr("d", geom.path)
+      .style("stroke-width", String(Math.max(1.5, 3 * Math.abs(d.strength) - 1)));
 
+    // Prominent chevron arrowhead at the target (loopy-style).
+    const [tip, leftWing, rightWing] = arrowHead(geom, target, ARROW_SIZE);
+    g.select(".edge-arrow").attr(
+      "d",
+      `M${leftWing.x},${leftWing.y} L${tip.x},${tip.y} L${rightWing.x},${rightWing.y}`,
+    );
+
+    // Polarity badge: a small rounded chip at the midpoint carrying the +/−
+    // symbol — clearer against the edge than a bare glyph (loopy draws a
+    // label at the midpoint). Data attributes let CSS style it.
+    g.select(".edge-polarity-bg")
+      .attr("cx", geom.midpoint.x)
+      .attr("cy", geom.midpoint.y)
+      .attr("r", POLARITY_BADGE_R)
+      .attr("data-polarity", d.polarity);
     g.select(".edge-polarity")
-      .attr("x", geom.midpoint.x - 4)
-      .attr("y", geom.midpoint.y - 6)
+      .attr("x", geom.midpoint.x)
+      .attr("y", geom.midpoint.y)
+      .attr("data-polarity", d.polarity)
       .text(polaritySymbol({ polarity: d.polarity } as Edge));
 
     const hash = g.select(".edge-hash");
@@ -321,6 +445,7 @@ export class Layer1Renderer {
       .attr("data-node-id", (d) => d.id);
 
     enter.append("circle").attr("class", "node-circle").attr("r", NODE_RADIUS);
+    enter.append("circle").attr("class", "node-value-circle").attr("r", NODE_RADIUS * 0.5);
     enter.append("text").attr("class", "node-label");
 
     const merged = enter.merge(sel);
@@ -332,6 +457,7 @@ export class Layer1Renderer {
       .text((d) => d.label);
     merged.classed("is-pinned", (d) => d.pinned);
     this.styleNodesForHeat();
+    this.styleNodeValues();
   }
 
   /** Apply (or clear) the Layer 2 heat overlay styling on node circles. */
@@ -413,7 +539,20 @@ export class Layer1Renderer {
         const loopId = loops.length > 0 ? loops[0].id : null;
         this.highlightLoop(loopId);
       })
-      .on("mouseleave", () => this.highlightLoop(null));
+      .on("mouseleave", () => this.highlightLoop(null))
+      // Loopy-style play: click nudges the node's value (top half +, bottom
+      // half −) and emits a signal onto its outgoing edges.
+      .on("click", (event, d) => {
+        if (!this.graph || !this.loopy) return;
+        const nodeEl = event.currentTarget as SVGGElement;
+        const [, ly] = pointer(event, nodeEl);
+        // (0,0) is the node center in the group's local space.
+        const direction = ly < 0 ? 1 : -1;
+        this.loopy = nudgeState(this.loopy, this.graph, d.id, direction * NUDGE_DELTA);
+        this.styleNodeValues();
+        this.drawSignals();
+        event.stopPropagation();
+      });
 
     this.labelLayer
       .selectAll<SVGGElement, Loop>("g.loop-label")

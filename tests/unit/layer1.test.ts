@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Edge, Loop } from "@/model/types";
 import {
+  arrowHead,
   delayBadge,
   delayHashMarks,
   delayHashMarksDouble,
@@ -12,6 +13,7 @@ import {
   loopLabel,
   polaritySymbol,
   shortenToCircleBounds,
+  valueRadiusFraction,
   type Point,
 } from "@/layer1/layout";
 
@@ -180,5 +182,50 @@ describe("heatColor & heatRadius", () => {
     const r2 = heatRadius(25, 1);
     expect(r0).toBeLessThanOrEqual(r1);
     expect(r1).toBeLessThanOrEqual(r2);
+  });
+});
+
+describe("arrowHead", () => {
+  it("places the tip at the target and wings behind it, perpendicular to the edge", () => {
+    const geom = edgeGeometry({ x: 0, y: 0 }, { x: 10, y: 0 });
+    const [tip, left, right] = arrowHead(geom, { x: 10, y: 0 }, 4);
+    expect(tip).toEqual({ x: 10, y: 0 });
+    // direction is +x, perp is +y/-y; wings sit back at x = 10 - 4 = 6.
+    expect(left.x).toBeCloseTo(6);
+    expect(right.x).toBeCloseTo(6);
+    expect(left.y).toBeCloseTo(-right.y);
+  });
+
+  it("orients along a diagonal edge", () => {
+    const geom = edgeGeometry({ x: 0, y: 0 }, { x: 3, y: 4 });
+    const [tip, left, right] = arrowHead(geom, { x: 3, y: 4 }, 5);
+    expect(tip).toEqual({ x: 3, y: 4 });
+    // Both wings sit behind the tip along the (0.6, 0.8) direction.
+    expect(left.x).toBeLessThan(tip.x);
+    expect(right.x).toBeLessThan(tip.x);
+    // Wings are symmetric about the edge axis: midpoint of wings is on-axis.
+    const mx = (left.x + right.x) / 2;
+    const my = (left.y + right.y) / 2;
+    expect(mx).toBeCloseTo(tip.x - 0.6 * 5, 5);
+    expect(my).toBeCloseTo(tip.y - 0.8 * 5, 5);
+  });
+});
+
+describe("valueRadiusFraction", () => {
+  it("maps the [0,1] interior linearly to [0.1, 0.9]", () => {
+    expect(valueRadiusFraction(0)).toBeCloseTo(0.1, 6);
+    expect(valueRadiusFraction(0.5)).toBeCloseTo(0.5, 6);
+    expect(valueRadiusFraction(1)).toBeCloseTo(0.9, 6);
+  });
+
+  it("is asymptotic outside [0,1] and never reaches 0 or 1", () => {
+    expect(valueRadiusFraction(-5)).toBeGreaterThan(0);
+    expect(valueRadiusFraction(-5)).toBeLessThan(0.1);
+    expect(valueRadiusFraction(5)).toBeLessThan(1);
+    expect(valueRadiusFraction(5)).toBeGreaterThan(0.9);
+  });
+
+  it("is monotonic non-decreasing across the interior", () => {
+    expect(valueRadiusFraction(0.2)).toBeLessThanOrEqual(valueRadiusFraction(0.8));
   });
 });

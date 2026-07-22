@@ -174,7 +174,37 @@ function main(): void {
           graph.loops = session.graph.loops;
           weights = session.weights;
           l2.setWeights(weights);
-          renderer.render(graph);
+  renderer.render(graph);
+
+  // --- Loopy-style play controls (spec §2 live simulation) ------------
+  const playBar = document.createElement("div");
+  playBar.className = "play-bar";
+  playBar.setAttribute("role", "toolbar");
+  playBar.setAttribute("aria-label", "Simulation");
+  const playBtn = document.createElement("button");
+  playBtn.type = "button";
+  playBtn.textContent = "Pause";
+  playBtn.classList.add("is-active");
+  playBtn.addEventListener("click", () => {
+    if (renderer.isPlaying()) {
+      renderer.pause();
+      playBtn.textContent = "Play";
+      playBtn.classList.remove("is-active");
+    } else {
+      renderer.play();
+      playBtn.textContent = "Pause";
+      playBtn.classList.add("is-active");
+    }
+  });
+  const resetBtn = document.createElement("button");
+  resetBtn.type = "button";
+  resetBtn.textContent = "Reset";
+  resetBtn.addEventListener("click", () => renderer.resetLoopy());
+  const hint = document.createElement("span");
+  hint.className = "play-hint";
+  hint.textContent = "Click a node to nudge it";
+  playBar.append(playBtn, resetBtn, hint);
+  root.append(playBar);
           l3.setNode(graph.nodes[0]?.id ?? "");
         })
         .catch((err: unknown) => {

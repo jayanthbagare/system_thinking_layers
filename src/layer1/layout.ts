@@ -31,6 +31,26 @@ export interface EdgeGeometry {
 }
 
 /**
+ * The four vertices of a chevron arrowhead placed at the edge's target end,
+ * oriented along the edge direction (after ncase/loopy). Returns the points in
+ * order so the caller can draw two strokes (a "V") or a filled triangle:
+ *   tip, then left-wing-tip, then right-wing-tip.
+ *
+ * `size` is the length of each wing in pixels. The head sits flush at the
+ * (already-shortened) target point so it reads clearly against the node.
+ */
+export function arrowHead(geom: EdgeGeometry, target: Point, size: number): [Point, Point, Point] {
+  const { direction } = geom;
+  const perp = { x: -direction.y, y: direction.x };
+  const back = { x: target.x - direction.x * size, y: target.y - direction.y * size };
+  return [
+    target,
+    { x: back.x + perp.x * size * 0.6, y: back.y + perp.y * size * 0.6 },
+    { x: back.x - perp.x * size * 0.6, y: back.y - perp.y * size * 0.6 },
+  ];
+}
+
+/**
  * Compute the geometry of a straight edge between two points. Layer 1 uses
  * straight edges (curved edges would obscure polarity and delay marks per
  * spec §2 — the diagram must stay readable as a thinking tool).
@@ -189,6 +209,18 @@ export function heatRadius(baseRadius: number, score: number): number {
   const t = clamp01(score);
   // Scale from 0.85x to 1.5x of the base radius.
   return baseRadius * (0.85 + 0.65 * t);
+}
+
+/**
+ * Map a loopy-style node value to a radius fraction in [0,1], used to size the
+ * inner "value" circle inside a node. Mirrors ncase/loopy's mapping: linear
+ * 0.1..0.9 inside [0,1], asymptotic outside so unbounded drift still reads.
+ * Pure and deterministic.
+ */
+export function valueRadiusFraction(value: number): number {
+  if (value >= 0 && value <= 1) return 0.1 + 0.8 * value;
+  if (value < 0) return (1 / (Math.abs(value) + 1)) * 0.1;
+  return 1 - (1 / value) * 0.1;
 }
 
 function clamp01(v: number): number {
