@@ -29,6 +29,8 @@ import {
   delayHashMarksDouble,
   edgeGeometry,
   hasDelay,
+  heatColor,
+  heatRadius,
   loopCentroid,
   loopLabel,
   polaritySymbol,
@@ -85,6 +87,8 @@ export class Layer1Renderer {
   private simNodes: SimNode[] = [];
   private simEdges: SimEdge[] = [];
   private activeLoopId: string | null = null;
+  /** Layer 2 heat overlay: node id -> score in [0,1]. null = no overlay. */
+  private heat: Map<string, number> | null = null;
   private readonly opts: RendererOptions;
 
   constructor(svg: SVGSVGElement, opts: RendererOptions) {
@@ -137,6 +141,17 @@ export class Layer1Renderer {
     this.applyHighlight();
     const l = loopId ? this.derived.loops.find((x) => x.id === loopId) ?? null : null;
     this.opts.onLoopHover?.(l);
+  }
+
+  /**
+   * Apply the Layer 2 heat overlay: color and size nodes by their constraint
+   * score. Pass null to clear the overlay. This only restyles nodes — it does
+   * NOT touch the force simulation, so sliders update live without re-running
+   * layout (spec §3 acceptance: "without re-running layout").
+   */
+  applyHeat(scores: Map<string, number> | null): void {
+    this.heat = scores;
+    this.styleNodesForHeat();
   }
 
   /** Tear down: stop the simulation and remove DOM listeners. */
@@ -316,6 +331,25 @@ export class Layer1Renderer {
       .attr("text-anchor", "middle")
       .text((d) => d.label);
     merged.classed("is-pinned", (d) => d.pinned);
+    this.styleNodesForHeat();
+  }
+
+  /** Apply (or clear) the Layer 2 heat overlay styling on node circles. */
+  private styleNodesForHeat(): void {
+    const sel = this.nodeLayer.selectAll<SVGGElement, SimNode>("g.node");
+    sel.each((d, i, groups) => {
+      const score = this.heat?.get(d.id) ?? 0;
+      const hasHeat = this.heat !== null && this.heat.has(d.id);
+      const circle = select(groups[i]).select(".node-circle");
+      if (hasHeat) {
+        circle
+          .attr("fill", heatColor(score))
+          .attr("r", heatRadius(NODE_RADIUS, score));
+      } else {
+        // Restore Layer 1 defaults (CSS-driven fill + base radius).
+        circle.attr("fill", null).attr("r", NODE_RADIUS);
+      }
+    });
   }
 
   private drawLoopLabels(): void {

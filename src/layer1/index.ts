@@ -6,6 +6,8 @@ export {
   delayHashMarksDouble,
   edgeGeometry,
   hasDelay,
+  heatColor,
+  heatRadius,
   loopCentroid,
   loopLabel,
   polaritySymbol,

@@ -6,6 +6,8 @@ import {
   delayHashMarksDouble,
   edgeGeometry,
   hasDelay,
+  heatColor,
+  heatRadius,
   loopCentroid,
   loopLabel,
   polaritySymbol,
@@ -141,5 +143,42 @@ describe("polaritySymbol", () => {
   it("renders + as a plus and - as a Unicode minus", () => {
     expect(polaritySymbol(edge("+", "none", 0))).toBe("+");
     expect(polaritySymbol(edge("-", "none", 0))).toBe("\u2212");
+  });
+});
+
+describe("heatColor & heatRadius", () => {
+  it("heatColor is pure and deterministic", () => {
+    expect(heatColor(0.5)).toBe(heatColor(0.5));
+  });
+
+  it("heatColor clamps out-of-range inputs to [0,1]", () => {
+    expect(heatColor(-1)).toBe(heatColor(0));
+    expect(heatColor(2)).toBe(heatColor(1));
+    expect(heatColor(NaN)).toBe(heatColor(0));
+  });
+
+  it("heatColor shifts hue from cool (low score) to red (high score)", () => {
+    const cool = heatColor(0);
+    const hot = heatColor(1);
+    // The cool end starts at hue 210 (blue); the hot end at hue 0 (red).
+    expect(cool).toContain("hsl(210");
+    expect(hot).toContain("hsl(0");
+  });
+
+  it("heatRadius scales between 0.85x and 1.5x of base, clamped", () => {
+    expect(heatRadius(20, 0)).toBeCloseTo(20 * 0.85, 6);
+    expect(heatRadius(20, 1)).toBeCloseTo(20 * 1.5, 6);
+    expect(heatRadius(20, 0.5)).toBeCloseTo(20 * (0.85 + 0.65 * 0.5), 6);
+    // Out-of-range clamps to the endpoints.
+    expect(heatRadius(20, -5)).toBe(heatRadius(20, 0));
+    expect(heatRadius(20, 99)).toBe(heatRadius(20, 1));
+  });
+
+  it("heatRadius is monotonic non-decreasing in score", () => {
+    const r0 = heatRadius(25, 0);
+    const r1 = heatRadius(25, 0.5);
+    const r2 = heatRadius(25, 1);
+    expect(r0).toBeLessThanOrEqual(r1);
+    expect(r1).toBeLessThanOrEqual(r2);
   });
 });

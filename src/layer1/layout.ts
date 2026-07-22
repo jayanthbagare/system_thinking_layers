@@ -160,3 +160,38 @@ export function delayBadge(edge: Edge): string {
   const m = edge.delay.magnitude;
   return Number.isInteger(m) ? String(m) : m.toFixed(1);
 }
+
+/**
+ * Heat color for a constraint score in [0,1]. Interpolates from a cool pale
+ * hue (low score, no constraint) to a hot deep red (high score, likely
+ * bottleneck) via HSL so the gradient is perceptually monotonic. Pure: same
+ * input -> same output. Used by both Layer 2's overlay and the side panel's
+ * rank chips so the two stay in sync.
+ *
+ * Color is never the sole encoding (per spec §6 a11y): score also drives node
+ * radius and the ranked side panel's textual breakdown.
+ */
+export function heatColor(score: number): string {
+  const t = clamp01(score);
+  // Hue 210 (cool blue) -> 0 (red). Lightness 90% -> 45% (darker = hotter).
+  const hue = 210 - 210 * t;
+  const lightness = 90 - 45 * t;
+  const saturation = 70 + 20 * t;
+  return `hsl(${hue.toFixed(0)}, ${saturation.toFixed(0)}%, ${lightness.toFixed(0)}%)`;
+}
+
+/**
+ * Node radius as a function of score. Layer 2 sizes nodes by score (spec §3:
+ * "colored/sized by a computed constraint score") so score is conveyed by two
+ * channels, not color alone. Pinned min/max so layout stays readable.
+ */
+export function heatRadius(baseRadius: number, score: number): number {
+  const t = clamp01(score);
+  // Scale from 0.85x to 1.5x of the base radius.
+  return baseRadius * (0.85 + 0.65 * t);
+}
+
+function clamp01(v: number): number {
+  if (Number.isNaN(v)) return 0;
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}

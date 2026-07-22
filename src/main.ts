@@ -1,14 +1,16 @@
 /**
  * Layers application entry point.
  *
- * Phase 2 scope: render the beer-distribution fixture as a Layer 1 CLD. Later
- * phases add the layer switcher, side panels, and ABM companion view on top of
- * this same canvas.
+ * Phase 3 scope: render the beer-distribution fixture as a Layer 1 CLD with the
+ * Layer 2 constraint overlay (heat coloring + ranked side panel with weight
+ * sliders). Later phases add Layer 3, the ABM companion view, and the layer
+ * switcher on top of this same canvas.
  */
 
 import { parseGraphOrThrow } from "@/dsl/parser";
 import { withComputedLoops } from "@/graph/loops";
 import { Layer1Renderer } from "@/layer1";
+import { Layer2Panel } from "@/layer2";
 import type { Node } from "@/model/types";
 // Vite ?raw import bundles the fixture as a string — no node:fs at runtime,
 // keeping the app client-side only (per spec: no backend).
@@ -42,6 +44,14 @@ function main(): void {
     },
   });
   renderer.render(graph);
+
+  // Layer 2 overlay: side panel owns the weight sliders and re-applies heat on
+  // the canvas without re-running the force layout.
+  const panelHost = document.createElement("aside");
+  panelHost.setAttribute("aria-label", "Constraint overlay");
+  root.append(panelHost);
+  const panel = new Layer2Panel(panelHost, graph, renderer, { topK: 3 });
+  panel.enable();
 
   // Re-derive loops stay live if edges change; refresh keeps the view in sync.
   window.addEventListener("resize", () => {
