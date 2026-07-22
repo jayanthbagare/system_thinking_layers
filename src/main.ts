@@ -1,10 +1,12 @@
 /**
  * Layers application entry point.
  *
- * Phase 3 scope: render the beer-distribution fixture as a Layer 1 CLD with the
- * Layer 2 constraint overlay (heat coloring + ranked side panel with weight
- * sliders). Later phases add Layer 3, the ABM companion view, and the layer
- * switcher on top of this same canvas.
+ * Phases 1–6: Layer 1 CLD, Layer 2 constraint overlay, Layer 3 T/I/OE
+ * simulation, ABM companion view, layer switcher, session save/load.
+ *
+ * Per spec §6: one active overlay at a time. The layer switcher enforces this;
+ * the side panels' enable/disable methods are the contract. The ABM companion
+ * is a separate pane, not an overlay.
  */
 
 import { parseGraphOrThrow } from "@/dsl/parser";
@@ -12,11 +14,17 @@ import { withComputedLoops } from "@/graph/loops";
 import { Layer1Renderer } from "@/layer1";
 import { Layer2Panel } from "@/layer2";
 import { Layer3Panel } from "@/layer3";
+import { AbmPanel } from "@/abm";
+import { LayerSwitcher, type LayerControl } from "@/ui";
+import { downloadSession, uploadSession } from "@/io";
+import type { DEFAULT_WEIGHTS } from "@/layer2/scoring";
 import type { Node } from "@/model/types";
 // Vite ?raw import bundles the fixture as a string — no node:fs at runtime,
 // keeping the app client-side only (per spec: no backend).
 import beerFixture from "./fixtures/beer-distribution.yaml?raw";
 import "./styles.css";
+
+type Weights = typeof DEFAULT_WEIGHTS;
 
 function main(): void {
   const root = document.getElementById("root");
@@ -26,17 +34,24 @@ function main(): void {
   svg.setAttribute("width", "100%");
   svg.setAttribute("height", "100%");
   svg.setAttribute("class", "layer1-canvas");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Causal loop diagram");
   root.append(svg);
 
   const graph = withComputedLoops(parseGraphOrThrow(beerFixture));
+
+  // Shared mutable weights (view parameter, not model state).
+  let weights: Weights = {
+    in_degree: 1,
+    delay_ratio: 1,
+    rate_mismatch: 1,
+    dominant_loop: 1,
+  };
 
   const renderer = new Layer1Renderer(svg, {
     width: window.innerWidth,
     height: window.innerHeight,
     onPin: (nodeId: string, pin: { x: number; y: number } | null) => {
-      // Persist the pin onto the Graph's node (single source of truth). A null
-      // pin (future: double-click to unpin) clears the key per
-      // exactOptionalPropertyTypes.
       const idx = graph.nodes.findIndex((n: Node) => n.id === nodeId);
       if (idx < 0) return;
       const { pin: _drop, ...rest } = graph.nodes[idx];
@@ -46,25 +61,131 @@ function main(): void {
   });
   renderer.render(graph);
 
-  // Layer 2 overlay: side panel owns the weight sliders and re-applies heat on
-  // the canvas without re-running the force layout.
-  const panelHost = document.createElement("aside");
-  panelHost.setAttribute("aria-label", "Constraint overlay");
-  panelHost.className = "side-panel side-panel--l2";
-  root.append(panelHost);
-  const panel = new Layer2Panel(panelHost, graph, renderer, { topK: 3 });
-  panel.enable();
+  // --- Side panels -------------------------------------------------------
+  const l2Host = document.createElement("aside");
+  l2Host.setAttribute("aria-label", "Constraint overlay");
+  l2Host.className = "side-panel side-panel--l2";
+  root.append(l2Host);
+  const l2 = new Layer2Panel(l2Host, graph, renderer, {
+    topK: 3,
+    onRescore: (w: Weights) => {
+      weights = w;
+    },
+  });
 
-  // Layer 3 overlay: T/I/OE simulation panel. Defaults its intervention node to
-  // the Layer 2 top-ranked constraint (spec: "what moving the constraint does").
   const l3Host = document.createElement("aside");
   l3Host.setAttribute("aria-label", "T/I/OE simulation");
   l3Host.className = "side-panel side-panel--l3";
   root.append(l3Host);
   const l3 = new Layer3Panel(l3Host, graph);
-  l3.enable();
 
-  // Re-derive loops stay live if edges change; refresh keeps the view in sync.
+  const abmHost = document.createElement("aside");
+  abmHost.setAttribute("aria-label", "ABM companion view");
+  abmHost.className = "side-panel side-panel--abm";
+  root.append(abmHost);
+  const abm = new AbmPanel(abmHost, graph, {
+    onVerdict: () => {
+      // Verdict is already written onto the Graph's node by the panel.
+    },
+  });
+  void abm;
+
+  // --- Layer switcher (spec §6: one overlay at a time) ------------------
+  const switcherHost = document.createElement("nav");
+  switcherHost.className = "layer-switcher-host";
+  root.append(switcherHost);
+  const switcher = new LayerSwitcher(switcherHost);
+
+  // Layer 1 is always active (the CLD itself); overlays toggle on top.
+  const l1Ctrl: LayerControl = {
+    id: "layer1",
+    label: "L1: CLD",
+    enable: () => {
+      l2.disable();
+      l3.disable();
+      renderer.applyHeat(null);
+    },
+    disable: () => {
+      /* Layer 1 is the base; never fully disabled. */
+    },
+  };
+  const l2Ctrl: LayerControl = {
+    id: "layer2",
+    label: "L2: Constraints",
+    enable: () => {
+      l3.disable();
+      l2.enable();
+    },
+    disable: () => l2.disable(),
+  };
+  const l3Ctrl: LayerControl = {
+    id: "layer3",
+    label: "L3: T/I/OE",
+    enable: () => {
+      l2.disable();
+      renderer.applyHeat(null);
+      l3.enable();
+    },
+    disable: () => l3.disable(),
+  };
+  const abmCtrl: LayerControl = {
+    id: "abm",
+    label: "ABM",
+    enable: () => {
+      l2.disable();
+      l3.disable();
+      renderer.applyHeat(null);
+      abmHost.classList.add("is-active");
+    },
+    disable: () => abmHost.classList.remove("is-active"),
+  };
+  switcher.register(l1Ctrl);
+  switcher.register(l2Ctrl);
+  switcher.register(l3Ctrl);
+  switcher.register(abmCtrl);
+  // Start with Layer 2 active (the most informative default for a new user).
+  switcher.switchTo("layer2");
+
+  // --- Session save/load (Phase 6) --------------------------------------
+  const ioHost = document.createElement("div");
+  ioHost.className = "io-bar";
+  ioHost.setAttribute("role", "toolbar");
+  ioHost.setAttribute("aria-label", "Session");
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.textContent = "Save session";
+  saveBtn.addEventListener("click", () => downloadSession(graph, weights));
+  const loadBtn = document.createElement("button");
+  loadBtn.type = "button";
+  loadBtn.textContent = "Load session";
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "application/json,.json";
+  fileInput.style.display = "none";
+  loadBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (file) {
+      uploadSession(file)
+        .then((session) => {
+          // Replace graph contents in place (the renderer/panels hold the ref).
+          graph.nodes = session.graph.nodes;
+          graph.edges = session.graph.edges;
+          graph.loops = session.graph.loops;
+          weights = session.weights;
+          l2.setWeights(weights);
+          renderer.render(graph);
+          l3.setNode(graph.nodes[0]?.id ?? "");
+        })
+        .catch((err: unknown) => {
+          window.alert(`Failed to load session: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }
+  });
+  ioHost.append(saveBtn, loadBtn, fileInput);
+  root.append(ioHost);
+
+  // --- Resize ------------------------------------------------------------
   window.addEventListener("resize", () => {
     renderer.refresh();
   });
