@@ -194,19 +194,27 @@ function validateEdge(
       ref: e.id,
     });
   }
-  if (e.delay === undefined || typeof e.delay.type !== "string" || !DELAY_TYPES.has(e.delay.type)) {
+  if (e.delay === undefined || typeof e.delay.type !== "string") {
     issues.push({
       code: "invalid_delay_type",
       message: `edge "${e.id}" has invalid delay.type`,
       ref: e.id,
     });
-  } else if (typeof e.delay.magnitude !== "number" || Number.isNaN(e.delay.magnitude)) {
+  } else if (!DELAY_TYPES.has(e.delay.type)) {
+    issues.push({
+      code: "invalid_delay_type",
+      message: `edge "${e.id}" has invalid delay.type`,
+      ref: e.id,
+    });
+  }
+  const mag = e.delay?.magnitude;
+  if (typeof mag !== "number" || Number.isNaN(mag)) {
     issues.push({
       code: "missing_edge_field",
       message: `edge "${e.id}" delay.magnitude must be a number`,
       ref: e.id,
     });
-  } else if (e.delay.magnitude < 0) {
+  } else if (mag < 0) {
     issues.push({
       code: "negative_delay",
       message: `edge "${e.id}" delay.magnitude must be >= 0`,

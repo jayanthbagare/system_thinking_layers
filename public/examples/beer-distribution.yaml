@@ -1,0 +1,101 @@
+# Beer Distribution Model — example graph for Layers.
+#
+# A classic system-dynamics fixture: the "bullwhip" supply chain, where small
+# changes in end-customer demand amplify upstream. Two reinforcing loops
+# (order amplification, inventory correction) meet a slow balancing loop
+# (production capacity), producing the oscillation characteristic of the system.
+#
+# Loops are NOT authored here — they are computed from the edges (src/graph).
+
+nodes:
+  - id: customer_demand
+    label: Customer Demand
+    type: flow
+    tioe_class: T
+    initial_value: 100
+    unit: units/week
+
+  - id: retailer_backlog
+    label: Retailer Backlog
+    type: stock
+    tioe_class: I
+    initial_value: 0
+    unit: units
+
+  - id: retailer_orders
+    label: Retailer Orders
+    type: flow
+    tioe_class: T
+    initial_value: 100
+    unit: units/week
+
+  - id: wholesaler_backlog
+    label: Wholesaler Backlog
+    type: stock
+    tioe_class: I
+    initial_value: 0
+    unit: units
+
+  - id: wholesaler_orders
+    label: Wholesaler Orders
+    type: flow
+    tioe_class: T
+    initial_value: 100
+    unit: units/week
+
+  - id: production_capacity
+    label: Production Capacity
+    type: stock
+    tioe_class: OE
+    initial_value: 100
+    unit: units/week
+
+edges:
+  - id: e1
+    source: customer_demand
+    target: retailer_backlog
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 1
+
+  - id: e2
+    source: retailer_backlog
+    target: retailer_orders
+    polarity: +
+    delay: { type: information, magnitude: 2 }
+    strength: 0.8
+
+  - id: e3
+    source: retailer_orders
+    target: wholesaler_backlog
+    polarity: +
+    delay: { type: material, magnitude: 4 }
+    strength: 1
+
+  - id: e4
+    source: wholesaler_backlog
+    target: wholesaler_orders
+    polarity: +
+    delay: { type: information, magnitude: 2 }
+    strength: 0.8
+
+  - id: e5
+    source: wholesaler_orders
+    target: production_capacity
+    polarity: +
+    delay: { type: material, magnitude: 6 }
+    strength: 1
+
+  - id: e6
+    source: production_capacity
+    target: wholesaler_backlog
+    polarity: +
+    delay: { type: material, magnitude: 3 }
+    strength: 1
+
+  - id: e7
+    source: wholesaler_orders
+    target: retailer_backlog
+    polarity: +
+    delay: { type: material, magnitude: 4 }
+    strength: 1
