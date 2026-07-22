@@ -1,0 +1,34 @@
+{
+  "name": "layers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Layered Constraint Visualization — CLD substrate, constraint overlay, T/I/OE overlay, and ABM companion view over one shared graph.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run --dir tests/unit",
+    "test:integration": "vitest run --dir tests/integration"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "eslint": "^10.0.0",
+    "jsdom": "^25.0.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
