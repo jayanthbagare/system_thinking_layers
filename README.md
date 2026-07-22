@@ -76,6 +76,7 @@ Loops are **never authored** — they are computed from the edges.
 
 ## Documentation
 
+- [`docs/user-guide.md`](./docs/user-guide.md) — complete beginner's guide (plain-language, every screen explained)
 - [`docs/usage-guide.md`](./docs/usage-guide.md) — detailed walkthrough of every layer and feature
 - [`docs/dsl-reference.md`](./docs/dsl-reference.md) — YAML/JSON authoring grammar
 - [`docs/data-model.md`](./docs/data-model.md) — the `Graph` types and invariants
