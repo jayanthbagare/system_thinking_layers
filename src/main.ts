@@ -70,6 +70,9 @@ function main(): void {
     topK: 3,
     onRescore: (w: Weights) => {
       weights = w;
+      // Propagate the new weights to Layer 3 so its default intervention
+      // node follows the (possibly changed) Layer 2 top constraint.
+      l3.setWeights(w);
     },
   });
 
@@ -146,36 +149,6 @@ function main(): void {
   // Start with Layer 2 active (the most informative default for a new user).
   switcher.switchTo("layer2");
 
-  // --- Session save/load (Phase 6) --------------------------------------
-  const ioHost = document.createElement("div");
-  ioHost.className = "io-bar";
-  ioHost.setAttribute("role", "toolbar");
-  ioHost.setAttribute("aria-label", "Session");
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.textContent = "Save session";
-  saveBtn.addEventListener("click", () => downloadSession(graph, weights));
-  const loadBtn = document.createElement("button");
-  loadBtn.type = "button";
-  loadBtn.textContent = "Load session";
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.accept = "application/json,.json";
-  fileInput.style.display = "none";
-  loadBtn.addEventListener("click", () => fileInput.click());
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files?.[0];
-    if (file) {
-      uploadSession(file)
-        .then((session) => {
-          // Replace graph contents in place (the renderer/panels hold the ref).
-          graph.nodes = session.graph.nodes;
-          graph.edges = session.graph.edges;
-          graph.loops = session.graph.loops;
-          weights = session.weights;
-          l2.setWeights(weights);
-  renderer.render(graph);
-
   // --- Loopy-style play controls (spec §2 live simulation) ------------
   const playBar = document.createElement("div");
   playBar.className = "play-bar";
@@ -205,7 +178,37 @@ function main(): void {
   hint.textContent = "Click a node to nudge it";
   playBar.append(playBtn, resetBtn, hint);
   root.append(playBar);
-          l3.setNode(graph.nodes[0]?.id ?? "");
+
+  // --- Session save/load (Phase 6) --------------------------------------
+  const ioHost = document.createElement("div");
+  ioHost.className = "io-bar";
+  ioHost.setAttribute("role", "toolbar");
+  ioHost.setAttribute("aria-label", "Session");
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.textContent = "Save session";
+  saveBtn.addEventListener("click", () => downloadSession(graph, weights));
+  const loadBtn = document.createElement("button");
+  loadBtn.type = "button";
+  loadBtn.textContent = "Load session";
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "application/json,.json";
+  fileInput.style.display = "none";
+  loadBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (file) {
+      uploadSession(file)
+        .then((session) => {
+          // Replace graph contents in place (the renderer/panels hold the ref).
+          graph.nodes = session.graph.nodes;
+          graph.edges = session.graph.edges;
+          graph.loops = session.graph.loops;
+          weights = session.weights;
+          l2.setWeights(weights);
+          renderer.render(graph);
+          l3.setWeights(weights);
         })
         .catch((err: unknown) => {
           window.alert(`Failed to load session: ${err instanceof Error ? err.message : String(err)}`);

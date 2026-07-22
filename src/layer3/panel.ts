@@ -16,7 +16,7 @@
 import type { Graph, Node } from "@/model/types";
 import { simulate, type Intervention, type IntegratorMethod } from "@/layer3";
 import { sparkline, type SparklineSeries } from "@/layer3";
-import { topConstraints } from "@/layer2/scoring";
+import { DEFAULT_WEIGHTS, topConstraints, type Weights } from "@/layer2/scoring";
 
 const PRE_COLOR = "#9e9e9e";
 const POST_COLOR = "#1976d2";
@@ -34,6 +34,9 @@ export class Layer3Panel {
   private readonly host: HTMLElement;
   private readonly graph: Graph;
   private nodeId: string;
+  private weights: Weights = { ...DEFAULT_WEIGHTS };
+  /** Once the user picks a node from the dropdown, stop auto-following L2. */
+  private userSelectedNode = false;
   private dt = DT_DEFAULT;
   private method: IntegratorMethod = "rk4";
   private steps = STEPS_DEFAULT;
@@ -45,13 +48,9 @@ export class Layer3Panel {
     this.graph = graph;
     this.host.classList.add("layer3-panel");
     // Default to the Layer 2 top-ranked constraint as the intervention node —
-    // the spec frames Layer 3 as "what moving the constraint does."
-    const top = topConstraints(graph, {
-      in_degree: 1,
-      delay_ratio: 1,
-      rate_mismatch: 1,
-      dominant_loop: 1,
-    })[0];
+    // the spec frames Layer 3 as "what moving the constraint does." Re-derived
+    // whenever weights change (see setWeights) unless the user picks a node.
+    const top = topConstraints(graph, this.weights)[0];
     this.nodeId = top?.nodeId ?? graph.nodes[0]?.id ?? "";
     this.render();
   }
@@ -78,8 +77,27 @@ export class Layer3Panel {
   /** Select a different intervention node. */
   setNode(nodeId: string): void {
     this.nodeId = nodeId;
+    this.userSelectedNode = true;
     this.syncNodeSelect();
     this.renderTrajectory();
+  }
+
+  /**
+   * Update the constraint weights and re-derive the default intervention node
+   * from the Layer 2 top constraint. Sparklines don't depend on weights
+   * directly — only on the selected node — so this only matters when the new
+   * weights change which node is #1. A manually chosen node is left alone.
+   */
+  setWeights(w: Weights): void {
+    this.weights = { ...w };
+    if (this.userSelectedNode) return;
+    const top = topConstraints(this.graph, this.weights)[0];
+    const newId = top?.nodeId ?? this.graph.nodes[0]?.id ?? "";
+    if (newId && newId !== this.nodeId) {
+      this.nodeId = newId;
+      this.syncNodeSelect();
+      this.renderTrajectory();
+    }
   }
 
   // --- rendering ---------------------------------------------------------
@@ -129,6 +147,7 @@ export class Layer3Panel {
     }
     select.addEventListener("change", () => {
       this.nodeId = select.value;
+      this.userSelectedNode = true;
       this.renderTrajectory();
     });
     nodeRow.append(nodeLabel, select);
