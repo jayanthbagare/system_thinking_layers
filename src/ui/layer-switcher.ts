@@ -27,7 +27,7 @@ export class LayerSwitcher {
     this.host = host;
     this.host.setAttribute("role", "tablist");
     this.host.setAttribute("aria-label", "Layer switcher");
-    this.host.className = "layer-switcher";
+    this.host.classList.add("layer-switcher");
   }
 
   register(control: LayerControl): void {
