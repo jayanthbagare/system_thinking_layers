@@ -84,6 +84,14 @@ export interface RendererOptions {
   onLoopHover?: (loop: Loop | null) => void;
   /** Persist a manual pin onto the Graph's node. */
   onPin?: (nodeId: string, pin: Point | null) => void;
+  /**
+   * A node was nudged (loopy-style click: top half +, bottom half −). The
+   * `direction` is +1 or −1. Used to drive the Layer 3 intervention node /
+   * delta sign so the sparklines respond to canvas interaction. The loopy
+   * animation itself is view-only and never writes to `Graph` (per
+   * src/layer1/signal.ts); this callback is the only outward channel.
+   */
+  onNudge?: (nodeId: string, direction: number) => void;
 }
 
 export class Layer1Renderer {
@@ -551,6 +559,7 @@ export class Layer1Renderer {
         this.loopy = nudgeState(this.loopy, this.graph, d.id, direction * NUDGE_DELTA);
         this.styleNodeValues();
         this.drawSignals();
+        this.opts.onNudge?.(d.id, direction);
         event.stopPropagation();
       });
 

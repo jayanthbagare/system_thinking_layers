@@ -175,6 +175,9 @@ body {
   font-size: 13px;
   color: var(--c-text);
   z-index: 10;
+  /* Hidden until the layer switcher enables this overlay (spec §6:
+     one overlay at a time). Mirrors the ABM panel's is-active gating. */
+  display: none;
 }
 
 .layer2-header {
@@ -303,6 +306,11 @@ body {
   font-size: 13px;
   color: var(--c-text);
   z-index: 10;
+  display: none;
+}
+.layer2-panel.is-active,
+.layer3-panel.is-active {
+  display: block;
 }
 
 .layer3-header {

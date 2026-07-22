@@ -26,6 +26,12 @@ function nodeSelectValue(host: HTMLElement): string {
   return sel.value;
 }
 
+function deltaSliderValue(host: HTMLElement): number {
+  const input = host.querySelector<HTMLInputElement>('[data-role="delta"]');
+  if (!input) throw new Error("delta slider not found");
+  return Number.parseFloat(input.value);
+}
+
 describe("Layer3Panel — setWeights follows the Layer 2 top constraint", () => {
   it("defaults the intervention node to the L2 top constraint (#1 = wholesaler_orders)", () => {
     const graph = loadBeerFixture();
@@ -73,5 +79,45 @@ describe("Layer3Panel — setWeights follows the Layer 2 top constraint", () => 
     svgs = host.querySelectorAll("svg.layer3-spark-svg");
     expect(svgs).toHaveLength(3);
     expect(nodeSelectValue(host)).toBe("production_capacity");
+  });
+});
+
+describe("Layer3Panel — applyNudge drives the intervention from a canvas nudge", () => {
+  it("selects the nudged node and re-renders the sparklines", () => {
+    const graph = loadBeerFixture();
+    const host = document.createElement("div");
+    const panel = new Layer3Panel(host, graph);
+    panel.enable();
+    expect(nodeSelectValue(host)).toBe("wholesaler_orders");
+
+    panel.applyNudge("production_capacity", 1);
+    expect(nodeSelectValue(host)).toBe("production_capacity");
+    expect(host.querySelectorAll("svg.layer3-spark-svg")).toHaveLength(3);
+  });
+
+  it("sets the intervention delta sign from the nudge direction (same magnitude)", () => {
+    const graph = loadBeerFixture();
+    const host = document.createElement("div");
+    const panel = new Layer3Panel(host, graph);
+    panel.enable();
+    const before = deltaSliderValue(host);
+
+    panel.applyNudge("production_capacity", -1);
+    expect(deltaSliderValue(host)).toBe(-Math.abs(before));
+
+    panel.applyNudge("production_capacity", 1);
+    expect(deltaSliderValue(host)).toBe(Math.abs(before));
+  });
+
+  it("locks the node: a later setWeights no longer auto-follows L2", () => {
+    const graph = loadBeerFixture();
+    const host = document.createElement("div");
+    const panel = new Layer3Panel(host, graph);
+    panel.enable();
+    panel.applyNudge("wholesaler_backlog", 1);
+    expect(nodeSelectValue(host)).toBe("wholesaler_backlog");
+
+    panel.setWeights(DELAY_ONLY);
+    expect(nodeSelectValue(host)).toBe("wholesaler_backlog");
   });
 });

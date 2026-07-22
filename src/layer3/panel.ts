@@ -100,6 +100,26 @@ export class Layer3Panel {
     }
   }
 
+  /**
+   * React to a loopy-style nudge on the canvas (top half +, bottom half −).
+   * Selects the nudged node as the intervention node (locking out L2
+   * auto-follow, like an explicit dropdown pick) and sets the intervention
+   * delta's sign from the nudge direction — keeping the current magnitude — so
+   * the sparklines re-derive a fresh post trajectory. This is the bridge
+   * between the Layer 1 animation and the Layer 3 quantitative view; it touches
+   * only view parameters (node + delta), never parallel state, so `simulate`
+   * still reads solely from `Graph`.
+   */
+  applyNudge(nodeId: string, direction: number): void {
+    this.nodeId = nodeId;
+    this.userSelectedNode = true;
+    const mag = Math.abs(this.delta);
+    this.delta = direction >= 0 ? mag : -mag;
+    this.syncNodeSelect();
+    this.syncDeltaSlider();
+    this.renderTrajectory();
+  }
+
   // --- rendering ---------------------------------------------------------
 
   private render(): void {
@@ -331,6 +351,14 @@ export class Layer3Panel {
   private syncNodeSelect(): void {
     const sel = this.host.querySelector<HTMLSelectElement>('[data-role="node-select"]');
     if (sel) sel.value = this.nodeId;
+  }
+
+  /** Keep the delta slider + its readout in sync with `this.delta`. */
+  private syncDeltaSlider(): void {
+    const input = this.host.querySelector<HTMLInputElement>('[data-role="delta"]');
+    if (input) input.value = String(this.delta);
+    const val = input?.parentElement?.querySelector(".layer3-control-value");
+    if (val) (val as HTMLElement).textContent = formatNumber(this.delta);
   }
 }
 

@@ -58,6 +58,11 @@ function main(): void {
       void _drop;
       graph.nodes[idx] = pin ? { ...rest, pin } : rest;
     },
+    onNudge: (nodeId: string, direction: number) => {
+      // Drive the Layer 3 intervention from the canvas nudge so the
+      // sparklines follow what the user is poking at.
+      l3.applyNudge(nodeId, direction);
+    },
   });
   renderer.render(graph);
 
