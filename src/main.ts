@@ -11,6 +11,7 @@ import { parseGraphOrThrow } from "@/dsl/parser";
 import { withComputedLoops } from "@/graph/loops";
 import { Layer1Renderer } from "@/layer1";
 import { Layer2Panel } from "@/layer2";
+import { Layer3Panel } from "@/layer3";
 import type { Node } from "@/model/types";
 // Vite ?raw import bundles the fixture as a string — no node:fs at runtime,
 // keeping the app client-side only (per spec: no backend).
@@ -49,9 +50,19 @@ function main(): void {
   // the canvas without re-running the force layout.
   const panelHost = document.createElement("aside");
   panelHost.setAttribute("aria-label", "Constraint overlay");
+  panelHost.className = "side-panel side-panel--l2";
   root.append(panelHost);
   const panel = new Layer2Panel(panelHost, graph, renderer, { topK: 3 });
   panel.enable();
+
+  // Layer 3 overlay: T/I/OE simulation panel. Defaults its intervention node to
+  // the Layer 2 top-ranked constraint (spec: "what moving the constraint does").
+  const l3Host = document.createElement("aside");
+  l3Host.setAttribute("aria-label", "T/I/OE simulation");
+  l3Host.className = "side-panel side-panel--l3";
+  root.append(l3Host);
+  const l3 = new Layer3Panel(l3Host, graph);
+  l3.enable();
 
   // Re-derive loops stay live if edges change; refresh keeps the view in sync.
   window.addEventListener("resize", () => {

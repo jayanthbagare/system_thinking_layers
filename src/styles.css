@@ -124,7 +124,7 @@ body {
   top: 12px;
   right: 12px;
   width: 300px;
-  max-height: calc(100vh - 24px);
+  max-height: calc(50vh - 18px);
   overflow-y: auto;
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.96);
@@ -244,4 +244,142 @@ body {
   margin: 0;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* ---------- Layer 3 side panel ---------- */
+.layer3-panel {
+  position: fixed;
+  top: calc(50vh + 6px);
+  right: 12px;
+  width: 300px;
+  max-height: calc(50vh - 18px);
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  font-size: 13px;
+  color: var(--c-text);
+  z-index: 10;
+}
+
+.layer3-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.layer3-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.layer3-toggle {
+  border: 1px solid #bbb;
+  background: #fff;
+  color: #555;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.layer3-toggle.is-on {
+  background: var(--c-delay);
+  border-color: var(--c-delay);
+  color: #fff;
+}
+
+.layer3-controls {
+  border-bottom: 1px solid #eee;
+  padding-bottom: 8px;
+}
+.layer3-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "label value"
+    "input input";
+  align-items: center;
+  gap: 2px 8px;
+  margin: 6px 0;
+}
+.layer3-control > span:first-child {
+  grid-area: label;
+  font-size: 12px;
+}
+.layer3-control-value {
+  grid-area: value;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: #555;
+}
+.layer3-control input[type="range"] {
+  grid-area: input;
+  width: 100%;
+  margin: 0;
+}
+.layer3-control select {
+  grid-area: input;
+  width: 100%;
+  margin: 0;
+}
+.layer3-method-group {
+  grid-area: input;
+  display: flex;
+  gap: 4px;
+}
+.layer3-method-group button {
+  flex: 1;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #555;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.layer3-method-group button.is-selected {
+  background: var(--c-delay);
+  border-color: var(--c-delay);
+  color: #fff;
+}
+
+.layer3-caption {
+  margin: 10px 0 6px;
+  color: #666;
+  font-size: 11px;
+}
+.layer3-spark-card {
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 6px 0;
+  background: #fff;
+}
+.layer3-spark-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.layer3-spark-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+.layer3-spark-delta {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #777;
+}
+.layer3-spark-delta.is-up {
+  color: var(--c-reinforcing);
+}
+.layer3-spark-delta.is-down {
+  color: var(--c-balancing);
+}
+.layer3-spark-svg {
+  width: 100%;
+  height: 48px;
+  display: block;
 }
