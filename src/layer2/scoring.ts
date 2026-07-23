@@ -63,6 +63,13 @@ export interface ScoredNode {
   contributions: SignalBreakdown;
   /** Raw signal values before normalization, for the detailed "why" panel. */
   raw: SignalBreakdown;
+  /**
+   * Current live load factor in [0,1] — how far the node's runtime value has
+   * drifted from rest, relative to the most-loaded node. 0 = at rest, 1 =
+   * most loaded. Omitted when no live values were supplied (structural-only
+   * scoring), so callers can detect whether the score is live-adjusted.
+   */
+  load?: number;
 }
 
 export interface ScoreResult {
@@ -72,8 +79,29 @@ export interface ScoreResult {
   weights: Weights;
 }
 
-/** Compute the constraint score for every node. Pure. */
-export function scoreGraph(graph: Graph, weights: Weights = DEFAULT_WEIGHTS): ScoreResult {
+/**
+ * Rest value matching the Layer 1 loopy simulation's `REST_VALUE` (0.5).
+ * Duplicated locally to avoid a cross-layer dependency on `layer1/signal`.
+ * A node whose live value equals this is "at rest" (no load).
+ */
+const REST_VALUE = 0.5;
+
+/**
+ * Compute the constraint score for every node. Pure.
+ *
+ * When `liveValues` is supplied (the current Layer 1 loopy animation state),
+ * each node's structural score is multiplied by a **load factor** derived
+ * from how far its runtime value has drifted from rest. A heavily loaded node
+ * (large deviation) gets a bigger boost, so the ranking reflects *active*
+ * bottlenecks — not just structural ones. The existing weights still control
+ * which structural signals matter; load only re-weights their product. When
+ * `liveValues` is omitted, the score is purely structural (the original behavior).
+ */
+export function scoreGraph(
+  graph: Graph,
+  weights: Weights = DEFAULT_WEIGHTS,
+  liveValues?: Map<string, number>,
+): ScoreResult {
   const loops = deriveLoops(graph).loops;
 
   const rawByNode = new Map<string, SignalBreakdown>();
@@ -104,6 +132,31 @@ export function scoreGraph(graph: Graph, weights: Weights = DEFAULT_WEIGHTS): Sc
       contributions.dominant_loop;
     return { nodeId: n.id, label: n.label, score, contributions, raw };
   });
+
+  // When live values are supplied, multiply each structural score by a load
+  // factor (1 + normalizedDeviation). A node at rest keeps its structural
+  // score; a fully loaded node gets 2×. Then re-normalize so the top is 1.0.
+  if (liveValues) {
+    let maxDev = 0;
+    const devByNode = new Map<string, number>();
+    for (const n of graph.nodes) {
+      const v = liveValues.get(n.id) ?? REST_VALUE;
+      const dev = Math.abs(v - REST_VALUE);
+      devByNode.set(n.id, dev);
+      if (dev > maxDev) maxDev = dev;
+    }
+    for (const sn of ranked) {
+      const dev = devByNode.get(sn.nodeId) ?? 0;
+      const normDev = maxDev > 0 ? dev / maxDev : 0;
+      sn.score = sn.score * (1 + normDev);
+      sn.load = normDev;
+    }
+    // Re-normalize to [0,1] (divide by max).
+    const maxScore = ranked.reduce((m, sn) => Math.max(m, sn.score), 0);
+    if (maxScore > 0) {
+      for (const sn of ranked) sn.score /= maxScore;
+    }
+  }
 
   ranked.sort((a, b) => b.score - a.score || (a.nodeId < b.nodeId ? -1 : 1));
   return { ranked, weights };

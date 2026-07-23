@@ -71,6 +71,12 @@ function main(): void {
       // delta's sign follows the nudge direction (up = +, down = −).
       l3.applyNudge(nodeId, direction);
     },
+    onLiveValues: (values: Map<string, number>) => {
+      // Feed live node values to Layer 2 so its constraint scores are
+      // load-adjusted as the animation runs — the ranking reflects *active*
+      // bottlenecks, not just structural ones.
+      l2.setLiveValues(values);
+    },
   });
   renderer.render(graph);
 
@@ -120,9 +126,10 @@ function main(): void {
       l2.disable();
       l3.disable();
       renderer.applyHeat(null);
+      monitorHost.classList.add("is-active");
     },
     disable: () => {
-      /* Layer 1 is the base; never fully disabled. */
+      monitorHost.classList.remove("is-active");
     },
   };
   const l2Ctrl: LayerControl = {
@@ -130,6 +137,7 @@ function main(): void {
     label: "L2: Constraints",
     enable: () => {
       l3.disable();
+      monitorHost.classList.remove("is-active");
       l2.enable();
     },
     disable: () => l2.disable(),
@@ -139,6 +147,7 @@ function main(): void {
     label: "L3: T/I/OE",
     enable: () => {
       l2.disable();
+      monitorHost.classList.remove("is-active");
       renderer.applyHeat(null);
       l3.enable();
     },
@@ -150,6 +159,7 @@ function main(): void {
     enable: () => {
       l2.disable();
       l3.disable();
+      monitorHost.classList.remove("is-active");
       renderer.applyHeat(null);
       abmHost.classList.add("is-active");
     },

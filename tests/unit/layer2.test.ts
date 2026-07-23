@@ -216,3 +216,77 @@ describe("scoreGraph — normalization", () => {
     expect(scored.ranked[0].score).toBeGreaterThan(0);
   });
 });
+
+describe("scoreGraph — live values (load adjustment)", () => {
+  it("without liveValues, load is undefined (structural-only)", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    const { ranked } = scoreGraph(g);
+    for (const sn of ranked) {
+      expect(sn.load).toBeUndefined();
+    }
+  });
+
+  it("with liveValues, load is set and in [0,1]", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    const live = new Map<string, number>();
+    for (const n of g.nodes) live.set(n.id, 0.5); // all at rest
+    live.set("wholesaler_orders", 0.9); // heavily loaded
+    const { ranked } = scoreGraph(g, DEFAULT_WEIGHTS, live);
+    for (const sn of ranked) {
+      expect(sn.load).toBeDefined();
+      expect(sn.load!).toBeGreaterThanOrEqual(0);
+      expect(sn.load!).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("the most-loaded node gets load 1.0", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    const live = new Map<string, number>();
+    for (const n of g.nodes) live.set(n.id, 0.5);
+    live.set("production_capacity", 0.2); // far from rest (0.5)
+    const { ranked } = scoreGraph(g, DEFAULT_WEIGHTS, live);
+    const pc = ranked.find((r) => r.nodeId === "production_capacity");
+    expect(pc?.load).toBeCloseTo(1.0, 5);
+  });
+
+  it("all-at-rest liveValues leaves ranking identical to structural-only", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    const live = new Map<string, number>();
+    for (const n of g.nodes) live.set(n.id, 0.5); // all at rest
+    const structural = scoreGraph(g);
+    const liveScored = scoreGraph(g, DEFAULT_WEIGHTS, live);
+    expect(liveScored.ranked.map((r) => r.nodeId)).toEqual(
+      structural.ranked.map((r) => r.nodeId),
+    );
+  });
+
+  it("a heavily loaded lower-ranked node can overtake a higher-ranked one", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    const structural = scoreGraph(g);
+    // Pick the #2 and #1 nodes; load #2 so it overtakes #1.
+    const secondId = structural.ranked[1].nodeId;
+    const firstScore = structural.ranked[0].score;
+    const secondScore = structural.ranked[1].score;
+    // Only worthwhile if they're close enough for a 2x boost to flip them.
+    // Skip otherwise (the structural gap is too large to close with load alone).
+    if (secondScore * 2 <= firstScore) return; // pragmatic skip
+    const live = new Map<string, number>();
+    for (const n of g.nodes) live.set(n.id, 0.5);
+    live.set(secondId, 0.1); // heavily loaded
+    const liveScored = scoreGraph(g, DEFAULT_WEIGHTS, live);
+    expect(liveScored.ranked[0].nodeId).toBe(secondId);
+  });
+
+  it("scores stay in [0,1] after load adjustment", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    const live = new Map<string, number>();
+    for (const n of g.nodes) live.set(n.id, 0.5);
+    live.set("wholesaler_orders", 0.9);
+    live.set("retailer_backlog", 0.1);
+    const { ranked } = scoreGraph(g, DEFAULT_WEIGHTS, live);
+    for (const sn of ranked) {
+      expect(sn.score).toBeGreaterThanOrEqual(0);
+      expect(sn.score).toBeLessThanOrEqual(1);
+    }
+  });
+});

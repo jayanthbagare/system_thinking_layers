@@ -96,7 +96,7 @@ export interface RendererOptions {
   /** Persist a manual pin onto the Graph's node. */
   onPin?: (nodeId: string, pin: Point | null) => void;
   /**
-   * A node's loopy-style up/down nudge arrow was clicked (loopy-style play).
+   * A node's loopy-style up/down-arrow nudge was clicked (loopy-style play).
    * The up arrow nudges the node's value up by `NUDGE_DELTA` (growth in the
    * positive direction); the down arrow nudges it down by `NUDGE_DELTA`
    * (growth in the negative direction). Either emits a signed signal onto the
@@ -108,6 +108,13 @@ export interface RendererOptions {
    * this callback is the only outward channel.
    */
   onNudge?: (nodeId: string, direction: number) => void;
+  /**
+   * Periodically emitted while the loopy animation is running, carrying a
+   * snapshot of every node's current value. Used by Layer 2 to load-adjust
+   * its constraint scores live. Throttled to every ~30 frames (~500ms at
+   * 60fps) to avoid re-scoring every frame.
+   */
+  onLiveValues?: (values: Map<string, number>) => void;
 }
 
 export class Layer1Renderer {
@@ -134,12 +141,21 @@ export class Layer1Renderer {
   private playing = true;
   private rafId: number | null = null;
 
-  /** Live node monitor: rolling history of the last-nudged node's value. */
+  /** Live node monitor: rolling history per node, plus the selected node. */
   private monitorHost: HTMLElement | null = null;
   private trackedNodeId: string | null = null;
-  private history: number[] = [];
-  private monitorT = 0;
+  private histories: Map<string, number[]> = new Map();
+  private cumulative: Map<string, number> = new Map();
+  private monitorBuilt = false;
+  private monitorMode: "all" | "single" = "single";
+  private monitorMetric: "value" | "cumulative" = "value";
   private static readonly HISTORY_CAP = 200;
+  /** Show a sparkline per node when the graph is small enough to fit. */
+  private static readonly ALL_NODES_THRESHOLD = 7;
+  /** Frame counter for throttling onLiveValues emissions. */
+  private liveFrame = 0;
+  private static readonly LIVE_EMIT_INTERVAL = 30;
+  private static readonly REST_VALUE = 0.5;
 
   constructor(svg: SVGSVGElement, opts: RendererOptions) {
     this.opts = opts;
@@ -174,15 +190,15 @@ export class Layer1Renderer {
     this.derived = deriveLoops(graph);
     this.activeLoopId = null;
     this.loopy = initialLoopyState(graph);
-    this.trackedNodeId = null;
-    this.history = [];
-    this.monitorT = 0;
+    this.trackedNodeId = graph.nodes[0]?.id ?? null;
+    this.histories = new Map();
+    this.monitorBuilt = false;
     this.buildSimNodes();
     this.buildSimEdges();
     this.startSimulation();
     this.draw();
     this.startLoopyLoop();
-    this.renderMonitor();
+    this.buildMonitor();
   }
 
   /** Update only the loops (e.g. after an edit that changes edges). */
@@ -220,7 +236,6 @@ export class Layer1Renderer {
     this.root.remove();
     if (this.monitorHost) this.monitorHost.innerHTML = "";
   }
-
   /** Start (or resume) the loopy-style signal animation. */
   play(): void {
     this.playing = true;
@@ -237,11 +252,11 @@ export class Layer1Renderer {
   resetLoopy(): void {
     if (!this.graph) return;
     this.loopy = initialLoopyState(this.graph);
-    this.history = [];
-    this.monitorT = 0;
+    this.histories = new Map();
+    this.cumulative = new Map();
+    this.buildMonitor();
     this.drawSignals();
     this.styleNodeValues();
-    this.renderMonitor();
   }
 
   isPlaying(): boolean {
@@ -259,6 +274,7 @@ export class Layer1Renderer {
       this.drawSignals();
       this.styleNodeValues();
       this.stepMonitor();
+      this.emitLiveValues();
       this.rafId = requestAnimationFrame(tick);
     };
     this.rafId = requestAnimationFrame(tick);
@@ -269,6 +285,20 @@ export class Layer1Renderer {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+  }
+
+  /**
+   * Emit a snapshot of every node's current loopy value via `onLiveValues`,
+   * throttled to every ~30 frames (~500ms). This is the bridge that lets
+   * Layer 2 load-adjust its constraint scores as the animation runs —
+   * the values are view-layer state, passed by value, never written to Graph.
+   */
+  private emitLiveValues(): void {
+    if (!this.loopy || !this.opts.onLiveValues) return;
+    this.liveFrame++;
+    if (this.liveFrame < Layer1Renderer.LIVE_EMIT_INTERVAL) return;
+    this.liveFrame = 0;
+    this.opts.onLiveValues(new Map(this.loopy.values));
   }
 
   /** Render the traveling pulses as small dots along each edge. */
@@ -320,77 +350,185 @@ export class Layer1Renderer {
   // --- internals ---------------------------------------------------------
 
   /**
-   * Record the tracked node's current value and redraw the live monitor
-   * sparkline. Called once per animation frame while playing; a no-op if no
-   * host was provided or no node has been nudged yet.
+   * Record every node's current value into its rolling history and refresh
+   * the monitor's sparklines. Called once per animation frame while playing.
+   * A no-op if no host was provided.
    */
   private stepMonitor(): void {
-    if (!this.loopy || !this.monitorHost) return;
-    if (this.trackedNodeId === null) {
-      this.renderMonitor();
-      return;
+    if (!this.loopy || !this.monitorHost || !this.graph) return;
+    for (const n of this.graph.nodes) {
+      const v = this.loopy.values.get(n.id) ?? 0.5;
+      const h = this.histories.get(n.id) ?? [];
+      if (this.monitorMetric === "cumulative") {
+        const cum = this.cumulative.get(n.id) ?? 0;
+        const delta = v - Layer1Renderer.REST_VALUE;
+        const newCum = cum + delta;
+        this.cumulative.set(n.id, newCum);
+        h.push(newCum);
+      } else {
+        h.push(v);
+      }
+      if (h.length > Layer1Renderer.HISTORY_CAP) h.shift();
+      this.histories.set(n.id, h);
     }
-    const v = this.loopy.values.get(this.trackedNodeId) ?? 0.5;
-    this.history.push(v);
-    if (this.history.length > Layer1Renderer.HISTORY_CAP) this.history.shift();
-    this.monitorT += 1;
-    this.renderMonitor();
+    if (!this.monitorBuilt) this.buildMonitor();
+    this.updateMonitorValues();
   }
 
   /**
-   * Render the live node monitor into its HTML host: the tracked node's label
-   * and current value, plus a sparkline of its value over the recent animation
-   * frames. This is a view over the loopy animation state only — it holds no
-   * model state and never writes to `Graph`.
+   * Build the monitor's static structure into its host: a header, a node
+   * dropdown (only when the graph has too many nodes to show all at once),
+   * and a sparkline container. Called once on render/reset; the dropdown
+   * change handler also calls this to rebuild for the new selection. This
+   * is a view over the loopy animation state only — it holds no model state
+   * and never writes to `Graph`.
    */
-  private renderMonitor(): void {
+  private buildMonitor(): void {
     const host = this.monitorHost;
-    if (!host) return;
+    if (!host || !this.graph) return;
     host.innerHTML = "";
     host.classList.add("node-monitor");
+
     const header = document.createElement("div");
     header.className = "node-monitor-head";
     const title = document.createElement("span");
     title.className = "node-monitor-title";
     title.textContent = "Live node monitor";
-    const sub = document.createElement("span");
-    sub.className = "node-monitor-sub";
-    if (this.trackedNodeId === null) {
-      sub.textContent = "nudge a node to plot its value over time";
-      header.append(title, sub);
-      host.append(header);
-      return;
-    }
-    const label = this.graph?.nodes.find((n) => n.id === this.trackedNodeId)?.label ?? this.trackedNodeId;
-    const current = this.history.length > 0 ? this.history[this.history.length - 1] : 0.5;
-    sub.textContent = `${label} \u00b7 ${current.toFixed(2)}`;
-    header.append(title, sub);
+    header.append(title);
+
+    // Value / Cumulative toggle.
+    const toggleGroup = document.createElement("div");
+    toggleGroup.className = "node-monitor-metric-toggle";
+    (["value", "cumulative"] as const).forEach((m) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = m === "value" ? "Value" : "Cumulative";
+      btn.dataset.metric = m;
+      btn.classList.toggle("is-selected", m === this.monitorMetric);
+      btn.addEventListener("click", () => {
+        if (this.monitorMetric === m) return;
+        this.monitorMetric = m;
+        this.histories = new Map();
+        this.cumulative = new Map();
+        toggleGroup
+          .querySelectorAll("button")
+          .forEach((b) => b.classList.toggle("is-selected", b.dataset.metric === m));
+        this.updateMonitorValues();
+      });
+      toggleGroup.append(btn);
+    });
+    header.append(toggleGroup);
     host.append(header);
 
-    if (this.history.length < 2) return;
-    const series: SparklineSeries[] = [
-      {
-        label: "value",
-        color: "#1976d2",
-        points: this.history.map((y, i) => ({ x: i, y })),
-      },
-    ];
-    const sl = sparkline(series, { width: 240, height: 52 });
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", sl.viewBox);
-    svg.setAttribute("class", "node-monitor-svg");
-    svg.setAttribute("preserveAspectRatio", "none");
-    for (const p of sl.paths) {
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", p.d);
-      path.setAttribute("stroke", p.color);
-      path.setAttribute("fill", "none");
-      path.setAttribute("stroke-width", "1.5");
-      path.setAttribute("stroke-linejoin", "round");
-      path.setAttribute("stroke-linecap", "round");
-      svg.append(path);
+    this.monitorMode =
+      this.graph.nodes.length < Layer1Renderer.ALL_NODES_THRESHOLD ? "all" : "single";
+
+    if (this.monitorMode === "single") {
+      const selectRow = document.createElement("label");
+      selectRow.className = "node-monitor-select-row";
+      const select = document.createElement("select");
+      select.className = "node-monitor-select";
+      select.dataset.role = "monitor-node-select";
+      for (const n of this.graph.nodes) {
+        const opt = document.createElement("option");
+        opt.value = n.id;
+        opt.textContent = n.label;
+        if (n.id === this.trackedNodeId) opt.selected = true;
+        select.append(opt);
+      }
+      select.addEventListener("change", () => {
+        this.trackedNodeId = select.value;
+        this.updateMonitorValues();
+      });
+      selectRow.append(select);
+      host.append(selectRow);
     }
-    host.append(svg);
+
+    const container = document.createElement("div");
+    container.className = "node-monitor-sparklines";
+    container.dataset.role = "monitor-sparklines";
+    host.append(container);
+
+    this.monitorBuilt = true;
+    this.updateMonitorValues();
+  }
+
+  /**
+   * Refresh the monitor's sparkline paths and value readouts without
+   * rebuilding the dropdown (so the user's open dropdown is not disturbed).
+   * Called every animation frame.
+   */
+  private updateMonitorValues(): void {
+    if (!this.monitorBuilt || !this.loopy || !this.graph || !this.monitorHost) return;
+    const container = this.monitorHost.querySelector<HTMLElement>(
+      '[data-role="monitor-sparklines"]',
+    );
+    if (!container) return;
+    container.innerHTML = "";
+
+    // Sync the dropdown selection to the tracked node (e.g. after a nudge).
+    const select = this.monitorHost.querySelector<HTMLSelectElement>(
+      '[data-role="monitor-node-select"]',
+    );
+    if (select && this.trackedNodeId && select.value !== this.trackedNodeId) {
+      select.value = this.trackedNodeId;
+    }
+
+    const nodeIds =
+      this.monitorMode === "all"
+        ? this.graph.nodes.map((n) => n.id)
+        : this.trackedNodeId
+          ? [this.trackedNodeId]
+          : [];
+
+    for (const id of nodeIds) {
+      const node = this.graph.nodes.find((n) => n.id === id);
+      if (!node) continue;
+      const hist = this.histories.get(id) ?? [];
+      const current = this.loopy.values.get(id) ?? 0.5;
+      const { fill } = valueColor(current);
+      const slColor = this.monitorMetric === "cumulative" ? "#1976d2" : fill;
+      const displayVal =
+        this.monitorMetric === "cumulative"
+          ? (this.cumulative.get(id) ?? 0).toFixed(2)
+          : current.toFixed(2);
+
+      const card = document.createElement("div");
+      card.className = "node-monitor-card";
+      const label = document.createElement("div");
+      label.className = "node-monitor-card-label";
+      label.textContent = `${node.label} \u00b7 ${displayVal}`;
+      label.style.color = slColor;
+      card.append(label);
+
+      if (hist.length >= 2) {
+        const series: SparklineSeries[] = [
+          {
+            label: "value",
+            color: slColor,
+            points: hist.map((y, i) => ({ x: i, y })),
+          },
+        ];
+        const slHeight = this.monitorMode === "all" ? 56 : 90;
+        const sl = sparkline(series, { width: 270, height: slHeight });
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", sl.viewBox);
+        svg.setAttribute("class", "node-monitor-svg");
+        svg.setAttribute("preserveAspectRatio", "none");
+        for (const p of sl.paths) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", p.d);
+          path.setAttribute("stroke", p.color);
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke-width", "1.5");
+          path.setAttribute("stroke-linejoin", "round");
+          path.setAttribute("stroke-linecap", "round");
+          svg.append(path);
+        }
+        card.append(svg);
+      }
+      container.append(card);
+    }
   }
 
   private buildSimNodes(): void {
@@ -700,11 +838,9 @@ export class Layer1Renderer {
     const nudgeNode = (nodeId: string, dir: number, event: MouseEvent): void => {
       if (!this.graph || !this.loopy) return;
       this.loopy = nudgeState(this.loopy, this.graph, nodeId, dir * NUDGE_DELTA);
-      // Track this node for the live monitor and start a fresh history so the
-      // sparkline shows this nudge's effect from a clean baseline.
+      // Track this node for the live monitor (in single-node mode the dropdown
+      // follows the nudge; in all-nodes mode every sparkline is already shown).
       this.trackedNodeId = nodeId;
-      this.history = [];
-      this.monitorT = 0;
       this.styleNodeValues();
       this.drawSignals();
       this.stepMonitor();

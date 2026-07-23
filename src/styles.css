@@ -313,6 +313,17 @@ body {
 .layer2-node-label {
   font-weight: 600;
 }
+.layer2-load-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--c-delay);
+  background: rgba(25, 118, 210, 0.1);
+  border-radius: 3px;
+  vertical-align: middle;
+}
 .layer2-breakdown {
   margin: 6px 0 0;
   font-size: 11px;
@@ -679,50 +690,98 @@ input[type="range"]:focus-visible {
   outline-offset: 2px;
 }
 
-/* ---------- Live node monitor (Layer 1 view) ---------- */
+/* ---------- Live node monitor (Layer 1 only, right side) ---------- */
 .node-monitor-host {
   position: fixed;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 30;
-  min-width: 260px;
-  max-width: 280px;
+  top: 12px;
+  right: 12px;
+  width: 340px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding: 12px 14px;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  padding: 6px 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  pointer-events: none;
-}
-.node-monitor-host:empty {
+  font-size: 13px;
+  color: var(--c-text);
+  z-index: 10;
   display: none;
+}
+.node-monitor-host.is-active {
+  display: block;
 }
 .node-monitor {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .node-monitor-head {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  margin-bottom: 4px;
 }
 .node-monitor-title {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--c-text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
-.node-monitor-sub {
-  font-size: 11px;
+.node-monitor-metric-toggle {
+  display: flex;
+  gap: 2px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.node-monitor-metric-toggle button {
+  border: none;
+  background: transparent;
   color: #777;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.node-monitor-metric-toggle button.is-selected {
+  background: var(--c-delay);
+  color: #fff;
+}
+.node-monitor-select-row {
+  display: flex;
+  margin-bottom: 4px;
+}
+.node-monitor-select {
+  width: 100%;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: #fff;
+  color: var(--c-text);
+}
+.node-monitor-sparklines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.node-monitor-card {
+  border-top: 1px solid #eee;
+  padding-top: 4px;
+}
+.node-monitor-card:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.node-monitor-card-label {
+  font-size: 11px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  margin-bottom: 2px;
 }
 .node-monitor-svg {
   width: 100%;
-  height: 52px;
+  height: 90px;
   display: block;
 }

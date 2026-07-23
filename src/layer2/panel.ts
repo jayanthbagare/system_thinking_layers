@@ -41,6 +41,8 @@ export class Layer2Panel {
   private readonly topK: number;
   private readonly onRescore: ((w: Weights) => void) | undefined;
   private weights: Weights;
+  /** Live node values from the L1 animation, used to load-adjust scores. */
+  private liveValues: Map<string, number> | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
 
@@ -85,6 +87,19 @@ export class Layer2Panel {
     this.weights = { ...w };
     this.syncSliderValues();
     this.recompute();
+  }
+
+  /**
+   * Feed live node values from the Layer 1 animation. The scores are
+   * load-adjusted (a node far from rest gets a bigger score) so the ranking
+   * reflects *active* bottlenecks, not just structural ones. Does NOT fire
+   * `onRescore` — that's reserved for weight changes — so Layer 3's
+   * auto-follow isn't disturbed by the animation.
+   */
+  setLiveValues(values: Map<string, number>): void {
+    this.liveValues = values;
+    if (!this.active) return;
+    this.recomputeLive();
   }
 
   // --- rendering ---------------------------------------------------------
@@ -185,6 +200,13 @@ export class Layer2Panel {
     const label = document.createElement("span");
     label.className = "layer2-node-label";
     label.textContent = sn.label;
+    if (sn.load !== undefined) {
+      const loadBadge = document.createElement("span");
+      loadBadge.className = "layer2-load-badge";
+      loadBadge.title = "Live load: how far this node's value has drifted from rest";
+      loadBadge.textContent = `load ${(sn.load * 100).toFixed(0)}%`;
+      label.append(loadBadge);
+    }
     const breakdown = document.createElement("dl");
     breakdown.className = "layer2-breakdown";
     (Object.keys(sn.contributions) as (keyof Weights)[]).forEach((key) => {
@@ -211,8 +233,19 @@ export class Layer2Panel {
 
   private recompute(): void {
     if (!this.active) return;
-    const { ranked, weights } = scoreGraph(this.graph, this.weights);
-    void weights;
+    this.recomputeLive();
+    this.onRescore?.(this.weights);
+  }
+
+  /**
+   * Re-score and refresh the ranking + heat overlay from `(graph, weights,
+   * liveValues)`. Does NOT fire `onRescore` — used by both weight changes
+   * (which add `onRescore` via `recompute`) and live-value updates (which
+   * must not ripple to Layer 3).
+   */
+  private recomputeLive(): void {
+    if (!this.active) return;
+    const { ranked } = scoreGraph(this.graph, this.weights, this.liveValues ?? undefined);
     // Apply heat to the canvas (no layout re-run).
     const scores = new Map<string, number>(ranked.map((r) => [r.nodeId, r.score]));
     this.renderer.applyHeat(scores);
@@ -224,7 +257,6 @@ export class Layer2Panel {
       if (caption) section.append(caption);
       ranked.slice(0, this.topK).forEach((sn, i) => section.append(this.renderRankedCard(sn, i + 1)));
     }
-    this.onRescore?.(this.weights);
   }
 
   private syncSliderValues(): void {
