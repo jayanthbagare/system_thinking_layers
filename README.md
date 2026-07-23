@@ -77,7 +77,7 @@ unfamiliar.
 | **Signal**               | A pulse that travels along an edge carrying a value change. When you nudge a node, a signal rides every outgoing arrow; when it lands, the target node's value shifts and a fresh signal rides onward. This is the live "running the network" animation — reinforcing loops amplify the pulse, balancing loops dampen it. |
 | **Nudge**                | A small push to a node's value via the ▲/▼ arrows that appear on hover. Up grows the value (positive direction); down shrinks it (negative direction). The signed change propagates to the next node and around the loop.                                                                              |
 | **Value circle**         | The filled circle inside each node. Its radius encodes the node's current value (bigger = higher); its color encodes the direction of drift (green = above rest, red = below rest). Updates live as pulses circulate.                                                                                  |
-| **Node monitor**         | A small sparkline card (bottom-center) that plots the last-nudged node's value over time. Lets you watch oscillation and amplification unfold as the live animation runs.                                                                                                                             |
+| **Node monitor**         | A right-side panel (L1 only) that plots node values over time as sparklines. In small graphs (< 7 nodes) all nodes are shown; in larger graphs a dropdown picks one. Lets you watch oscillation and amplification unfold as the live animation runs. |
 | **Intervention**         | A hypothetical change you make to one node to see what would happen — "what if we doubled capacity here?"                                                                                                                                                                                              |
 | **Agent**                | An individual actor in the system — one warehouse, one customer, one machine. The ABM view simulates many agents individually and sees what emerges in aggregate.                                                                                                                                      |
 | **ABM**                  | Agent-Based Model. Instead of modeling the system as one big equation, you model many small agents with simple rules and watch the big-picture pattern emerge.                                                                                                                                         |
@@ -149,23 +149,16 @@ going clockwise:
 │             [Pause] [Reset]  Hover a node, click ▲/▼ │  ← Play bar (top-center)
 │                                                      │
 │                                       ┌────────────┐ │
-│                                       │ Layer 2    │ │  ← Constraint panel (top-right)
-│            MAIN CANVAS                │ Constraints│ │
-│         (the diagram, drawn           │            │ │
-│          here with nodes and          │ sliders +  │ │
-│          arrows and loops)            │ top-3 list │ │
+│            MAIN CANVAS                │ L2 / L3 /   │ │  ← Side panel (top-right)
+│         (the diagram, drawn           │ Node monitor│ │     (switches with the layer)
+│          here with nodes and          │            │ │
+│          arrows and loops)            │            │ │
 │                                      ─┤            │ │
-│         ▲ hover a node to nudge it    │ Layer 3    │ │  ← Simulation panel (bottom-right)
-│         ▼ (up = +, down = −)          │ T / I / OE │ │
-│                                       │            │ │
-│                                       │ sparklines │ │
+│         ▲ hover a node to nudge it    │            │ │
+│         ▼ (up = +, down = −)          │            │ │
 │                                       └────────────┘ │
 │                                                      │
 │  [Save session] [Load session]                       │  ← Session bar (bottom-left)
-│           ┌─────────────────────┐                    │
-│           │ Live node monitor   │                    │  ← Node monitor (bottom-center)
-│           │ ▁▂▃▅▆▇▆▅▃▂▁         │                    │
-│           └─────────────────────┘                    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -177,7 +170,7 @@ for thinking, not for overwhelming you with simultaneous views).
 
 | Button              | What it shows                                                                                       |
 | ------------------- | --------------------------------------------------------------------------------------------------- |
-| **L1: CLD**         | Just the base diagram. No coloring, no side panels.                                                 |
+| **L1: CLD**         | The base diagram + the live node monitor panel (sparklines of node values over time).              |
 | **L2: Constraints** | The diagram + heat coloring + the constraint ranking panel. This is the default when the app opens. |
 | **L3: T/I/OE**      | The diagram + the simulation panel with sparklines.                                                 |
 | **ABM**             | The diagram + the agent-based model companion panel.                                                |
@@ -194,10 +187,15 @@ drag, pan, and zoom. Details in section 6.
 
 ### The side panels (right side)
 
-- **Top-right**: the Layer 2 constraint panel (sliders + ranked list).
-- **Bottom-right**: the Layer 3 simulation panel (sparklines).
-- When you switch to **ABM**, the right side shows the ABM companion panel
-  instead (it takes the full right side height).
+The right-side panel swaps depending on which layer is active:
+
+- **L1: CLD** — the **live node monitor** (sparklines of node values over
+  time; see below).
+- **L2: Constraints** — the constraint panel (sliders + ranked list).
+- **L3: T/I/OE** — the simulation panel (sparklines).
+- **ABM** — the ABM companion panel (full right-side height).
+
+Only one panel is visible at a time (the layer switcher enforces this).
 
 ### The play bar (top-center)
 
@@ -209,15 +207,33 @@ A small toolbar with three parts:
 | **Reset**    | Returns every node's value to its rest state and clears all traveling signals. Useful before starting a fresh nudge experiment.         |
 | **Hint text** | Reminds you how to drive the simulation: "Hover a node, click ▲/▼ to nudge it."                                                        |
 
-### The live node monitor (bottom-center)
+### The live node monitor (L1 only, right side)
 
-A small sparkline card that appears once you nudge a node. It plots the
-**last-nudged node's value over time** as the live animation runs — so you
-can watch the bullwhip effect unfold: the value rises (green) or falls
-(red) as pulses circulate and amplify or dampen around the loops. The
-card shows the node's label and its current numeric value, plus a rolling
-sparkline of the last ~200 animation frames. It updates every frame while
-the animation is playing.
+When **L1: CLD** is the active layer, the right-side panel becomes a live
+node monitor. It plots each node's value over time as the live animation
+runs — so you can watch the bullwhip effect unfold: values rise (green)
+or fall (red) as pulses circulate and amplify or dampen around the loops.
+
+The monitor has two modes, chosen automatically by graph size:
+
+- **Small graphs (fewer than 7 nodes):** a sparkline is shown for **every
+  node**, stacked vertically. Each card shows the node's label, its current
+  numeric value (colored green for growth / red for decline), and a large
+  rolling sparkline of the last ~200 animation frames. The beer-distribution
+  model (6 nodes) uses this mode — you see all six nodes at once.
+- **Larger graphs (7 or more nodes):** a **dropdown** lets you pick which
+  node to monitor. Nudging a node on the canvas automatically switches the
+  dropdown to that node; you can also pick any node manually (e.g. switch
+  from "Wholesaler Backlog" to "Customer Demand").
+
+A **Value / Cumulative** toggle in the monitor header switches the metric:
+
+- **Value** (default): plots the node's raw loopy value (0.5 = rest). Shows
+  the current state — oscillation, growth, decline.
+- **Cumulative**: plots the running sum of each node's deviation from rest.
+  Shows the net drift direction over time — a rising line means the node has
+  been pushed above rest more than below, a flat line means it's oscillating
+  symmetrically. Useful for spotting which nodes accumulate the most stress.
 
 ### The session bar (bottom-left)
 
@@ -376,10 +392,12 @@ The diagram is not static — it is alive. By default, the animation is
    edges (backlog → orders) have a strength of 1.3, so a small demand nudge
    amplifies as it travels upstream: each stage's value circle grows larger
    than the last.
-5. **Watch the live node monitor** (bottom-center). The last node you
-   nudged gets its value plotted over time in a small sparkline. You see
-   the oscillation — the value rises and falls as pulses circle the loops
-   and come back — which is the characteristic signature of the bullwhip.
+5. **Watch the live node monitor** (right side, L1 only). The node you
+   nudged gets its value plotted over time in a sparkline. If the graph has
+   fewer than 7 nodes (the beer model has 6), you see a sparkline for every
+   node at once. You see the oscillation — values rise and fall as pulses
+   circle the loops and come back — which is the characteristic signature of
+   the bullwhip.
 
 Use the **Pause/Play** and **Reset** buttons in the play bar
 (top-center) to control the animation. Pause to inspect a frozen state;
@@ -414,6 +432,16 @@ node.
 
 This answers the question: **"If I could change one thing in this system,
 which node would have the biggest ripple effect?"**
+
+The score is **live-adjusted**: as the Layer 1 animation runs and nodes
+get loaded (their values drift from rest), the ranking updates to reflect
+which nodes are *actively* stressed. A node that is structurally a
+candidate but is currently at rest drops in rank; a node that is
+structurally weaker but is currently heavily loaded climbs. A small
+**load** badge on each card shows how far that node's value has drifted
+from rest, as a percentage. This keeps the structural weights in control
+— they still determine which signals matter — while the live load
+re-weights the result.
 
 ### What you see
 
