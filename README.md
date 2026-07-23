@@ -76,6 +76,8 @@ unfamiliar.
 | **Sparkline**            | A tiny line chart showing how a value changes over time. No axis labels; just the shape.                                                                                                                                                                                                               |
 | **Signal**               | A pulse that travels along an edge carrying a value change. When you nudge a node, a signal rides every outgoing arrow; when it lands, the target node's value shifts and a fresh signal rides onward. This is the live "running the network" animation — reinforcing loops amplify the pulse, balancing loops dampen it. |
 | **Nudge**                | A small push to a node's value via the ▲/▼ arrows that appear on hover. Up grows the value (positive direction); down shrinks it (negative direction). The signed change propagates to the next node and around the loop.                                                                              |
+| **Value circle**         | The filled circle inside each node. Its radius encodes the node's current value (bigger = higher); its color encodes the direction of drift (green = above rest, red = below rest). Updates live as pulses circulate.                                                                                  |
+| **Node monitor**         | A small sparkline card (bottom-center) that plots the last-nudged node's value over time. Lets you watch oscillation and amplification unfold as the live animation runs.                                                                                                                             |
 | **Intervention**         | A hypothetical change you make to one node to see what would happen — "what if we doubled capacity here?"                                                                                                                                                                                              |
 | **Agent**                | An individual actor in the system — one warehouse, one customer, one machine. The ABM view simulates many agents individually and sees what emerges in aggregate.                                                                                                                                      |
 | **ABM**                  | Agent-Based Model. Instead of modeling the system as one big equation, you model many small agents with simple rules and watch the big-picture pattern emerge.                                                                                                                                         |
@@ -144,6 +146,7 @@ going clockwise:
 ```
 ┌──────────────────────────────────────────────────────┐
 │  [L1: CLD] [L2: Constraints] [L3: T/I/OE] [ABM]      │  ← Layer switcher (top-left)
+│             [Pause] [Reset]  Hover a node, click ▲/▼ │  ← Play bar (top-center)
 │                                                      │
 │                                       ┌────────────┐ │
 │                                       │ Layer 2    │ │  ← Constraint panel (top-right)
@@ -158,8 +161,11 @@ going clockwise:
 │                                       │ sparklines │ │
 │                                       └────────────┘ │
 │                                                      │
-│  [Pause] [Reset]  Hover a node, click ▲/▼ to nudge   │  ← Play bar (bottom-left)
 │  [Save session] [Load session]                       │  ← Session bar (bottom-left)
+│           ┌─────────────────────┐                    │
+│           │ Live node monitor   │                    │  ← Node monitor (bottom-center)
+│           │ ▁▂▃▅▆▇▆▅▃▂▁         │                    │
+│           └─────────────────────┘                    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -193,7 +199,7 @@ drag, pan, and zoom. Details in section 6.
 - When you switch to **ABM**, the right side shows the ABM companion panel
   instead (it takes the full right side height).
 
-### The play bar (bottom-left)
+### The play bar (top-center)
 
 A small toolbar with three parts:
 
@@ -202,6 +208,16 @@ A small toolbar with three parts:
 | **Pause/Play** | Pauses or resumes the live signal animation (the pulses traveling along edges). The animation runs by default when the app opens.      |
 | **Reset**    | Returns every node's value to its rest state and clears all traveling signals. Useful before starting a fresh nudge experiment.         |
 | **Hint text** | Reminds you how to drive the simulation: "Hover a node, click ▲/▼ to nudge it."                                                        |
+
+### The live node monitor (bottom-center)
+
+A small sparkline card that appears once you nudge a node. It plots the
+**last-nudged node's value over time** as the live animation runs — so you
+can watch the bullwhip effect unfold: the value rises (green) or falls
+(red) as pulses circulate and amplify or dampen around the loops. The
+card shows the node's label and its current numeric value, plus a rolling
+sparkline of the last ~200 animation frames. It updates every frame while
+the animation is playing.
 
 ### The session bar (bottom-left)
 
@@ -285,7 +301,10 @@ diagram with no overlays.
   thicker border to show it is "pinned." Inside each node, a smaller filled
   circle (the **value circle**) grows and shrinks to show the node's current
   value as the live simulation runs — this is the loopy-style heartbeat of
-  the network.
+  the network. The value circle also **changes color**: green when the
+  node's value is above its rest state (growth), red when below (decline),
+  with intensity proportional to how far it has drifted — so you can see at
+  a glance which nodes are being amplified or dampened.
 
 - **Nudge arrows** — when you hover a node, two small arrows appear: a
   **▲ above** it and a **▼ below** it. Click ▲ to nudge the node's value
@@ -348,14 +367,22 @@ The diagram is not static — it is alive. By default, the animation is
    edge.
 3. **Watch the pulse travel.** A small dot rides along each arrow. When
    it reaches the target node, that node's value shifts (and its inner
-   value circle resizes), then a fresh pulse rides onward down that
-   node's outgoing edges.
-4. **Watch the loop close.** On a reinforcing loop, the pulse comes back
-   bigger (amplification). On a balancing loop, it comes back smaller
-   (dampening). This is the bullwhip effect made visible.
+   value circle resizes and recolors — green for growth, red for decline),
+   then a fresh pulse rides onward down that node's outgoing edges.
+4. **Watch the loop close.** On a reinforcing loop where edge strengths
+   exceed 1, the pulse comes back bigger (amplification) — this is the
+   bullwhip effect made visible. On a balancing loop, or where strengths
+   are below 1, the pulse dampens. In the beer model, the order-triggering
+   edges (backlog → orders) have a strength of 1.3, so a small demand nudge
+   amplifies as it travels upstream: each stage's value circle grows larger
+   than the last.
+5. **Watch the live node monitor** (bottom-center). The last node you
+   nudged gets its value plotted over time in a small sparkline. You see
+   the oscillation — the value rises and falls as pulses circle the loops
+   and come back — which is the characteristic signature of the bullwhip.
 
 Use the **Pause/Play** and **Reset** buttons in the play bar
-(bottom-left) to control the animation. Pause to inspect a frozen state;
+(top-center) to control the animation. Pause to inspect a frozen state;
 Reset to return every node to its rest value before a new experiment.
 
 > **The animation is view-only.** It never writes to your graph — it is a
