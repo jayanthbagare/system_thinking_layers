@@ -11,7 +11,7 @@ import {
 } from "@/abm/validate";
 
 function stock(id: string, value = 0): Node {
-  return { id, label: id, type: "stock", tioe_class: "none", initial_value: value, unit: "u" };
+  return { id, label: id, type: "stock", initial_value: value, unit: "u" };
 }
 
 function edge(

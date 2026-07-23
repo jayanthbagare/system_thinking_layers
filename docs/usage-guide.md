@@ -58,14 +58,13 @@ nodes:
   - id: backlog
     label: Order Backlog
     type: stock
-    tioe_class: I
     initial_value: 0
     unit: units
 
   - id: orders
     label: Order Rate
     type: flow
-    tioe_class: T
+    boundary: true
     initial_value: 100
     unit: units/week
 
@@ -86,13 +85,13 @@ edges:
 | `loops` is **never authored** | loops are computed from edges (Johnson's algorithm) |
 | `polarity` is `+` or `-` | even number of `-` edges around a cycle → reinforcing (R); odd → balancing (B) |
 | `delay.magnitude` must be ≥ 0 | measured in model time units |
-| `tioe_class` is `T`, `I`, `OE`, or `none` | used by Layer 3 to aggregate Throughput / Investment-Inventory / Operating Expense |
+| `boundary: true` marks the system's ports | T/I/OE are derived from the boundary + topology, not hand-authored. Nodes with no incoming edges are auto-detected as boundary. |
 | `type` is `stock`, `flow`, or `auxiliary` | stocks accumulate; flows are rates; auxiliaries are conduits |
 
 ### Defaults
 
-Omitted fields get sensible defaults: `type` → `auxiliary`, `tioe_class` →
-`none`, `initial_value` → `0`, `polarity` → `+`, `strength` → `1`,
+Omitted fields get sensible defaults: `type` → `auxiliary`, `boundary` →
+auto (exogenous nodes auto-detected), `initial_value` → `0`, `polarity` → `+`, `strength` → `1`,
 `delay` → `{ type: none, magnitude: 0 }`.
 
 ### Validation

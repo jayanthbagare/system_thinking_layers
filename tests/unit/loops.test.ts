@@ -16,11 +16,12 @@ function node(id: string, partial: Partial<Node> = {}): Node {
     id,
     label: partial.label ?? id,
     type: partial.type ?? "stock",
-    tioe_class: partial.tioe_class ?? "none",
     initial_value: partial.initial_value ?? 0,
     unit: partial.unit ?? "u",
+    ...(partial.boundary !== undefined ? { boundary: partial.boundary } : {}),
     ...(partial.pin ? { pin: partial.pin } : {}),
     ...(partial.agent_binding ? { agent_binding: partial.agent_binding } : {}),
+    ...(partial.collar ? { collar: partial.collar } : {}),
   };
 }
 

@@ -1,5 +1,5 @@
 import yaml from "js-yaml";
-import type { Graph, Node, Edge, NodeType, TioeClass, Polarity, DelayType, CollarApproach, EdgeRange } from "@/model/types";
+import type { Graph, Node, Edge, NodeType, Polarity, DelayType, CollarApproach, EdgeRange } from "@/model/types";
 import { validate, type ValidationIssue } from "@/model/validate";
 
 /**
@@ -76,7 +76,7 @@ export function serializeGraphYaml(graph: Graph): string {
     lines.push(`  - id: ${yamlScalar(n.id)}`);
     lines.push(`    label: ${yamlScalar(n.label)}`);
     lines.push(`    type: ${yamlScalar(n.type)}`);
-    lines.push(`    tioe_class: ${yamlScalar(n.tioe_class)}`);
+    if (n.boundary) lines.push(`    boundary: true`);
     lines.push(`    initial_value: ${num(n.initial_value)}`);
     lines.push(`    unit: ${yamlScalar(n.unit)}`);
     if (n.collar) {
@@ -150,7 +150,7 @@ interface RawNode {
   id?: string;
   label?: string;
   type?: string;
-  tioe_class?: string;
+  boundary?: boolean;
   initial_value?: number;
   unit?: string;
   lower_collar?: number;
@@ -158,6 +158,7 @@ interface RawNode {
   collar?: { lower?: number; upper?: number; approach?: string };
   agent_binding?: { rule_id?: string };
   pin?: { x?: number; y?: number };
+  tioe_class?: string;
 }
 
 interface RawEdge {
@@ -206,9 +207,9 @@ function normalizeNode(r: RawNode): Node {
     id: r.id ?? "",
     label: r.label ?? r.id ?? "",
     type: (r.type as NodeType) ?? "auxiliary",
-    tioe_class: (r.tioe_class as TioeClass) ?? "none",
     initial_value: r.initial_value ?? 0,
     unit: r.unit ?? "",
+    ...(r.boundary === true ? { boundary: true } : {}),
     ...(pin ? { pin } : {}),
     ...(collar ? { collar } : {}),
     ...(agent_binding ? { agent_binding } : {}),
@@ -217,6 +218,8 @@ function normalizeNode(r: RawNode): Node {
   // NOT reinterpreted — the author must restate them in the collar: block.
   if (typeof r.lower_collar === "number") (node as unknown as Record<string, unknown>).lower_collar = r.lower_collar;
   if (typeof r.upper_collar === "number") (node as unknown as Record<string, unknown>).upper_collar = r.upper_collar;
+  // Pass legacy tioe_class through so the validator can flag it.
+  if (r.tioe_class !== undefined) (node as unknown as Record<string, unknown>).tioe_class = r.tioe_class;
   return node;
 }
 

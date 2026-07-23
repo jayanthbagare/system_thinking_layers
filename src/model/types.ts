@@ -8,9 +8,6 @@
 /** Stock-flow semantics, not just a CLD box. */
 export type NodeType = "stock" | "flow" | "auxiliary";
 
-/** Layer 3 tag. Throughput / Investment-Inventory / Operating Expense / none. */
-export type TioeClass = "T" | "I" | "OE" | "none";
-
 /** How a collar bound is enforced at the boundary. */
 export type CollarApproach = "hard" | "soft";
 
@@ -52,7 +49,18 @@ export interface Node {
   id: string;
   label: string;
   type: NodeType;
-  tioe_class: TioeClass;
+  /**
+   * When `true`, this node is part of the system boundary — the interface
+   * between the system and its environment (market demand, supplier inputs,
+   * customer outputs). Boundary nodes are NOT part of the system's interior;
+   * they are the system's ports. T/I/OE are derived from the boundary +
+   * topology (Phase 3), replacing the hand-authored `tioe_class` tag.
+   *
+   * Auto-derivation: if no node has `boundary: true`, nodes with no incoming
+   * edges (exogenous drivers) are treated as boundary. This is the common
+   * case — most models have a demand/supply driver that is exogenous.
+   */
+  boundary?: boolean;
   initial_value: number;
   unit: string;
   /**

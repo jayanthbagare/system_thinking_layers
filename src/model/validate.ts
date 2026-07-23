@@ -9,7 +9,6 @@ import type {
   Node,
   NodeType,
   Polarity,
-  TioeClass,
 } from "./types";
 
 /**
@@ -30,7 +29,8 @@ export type ValidationCode =
   | "missing_node_field"
   | "missing_edge_field"
   | "invalid_node_type"
-  | "invalid_tioe_class"
+  | "invalid_boundary"
+  | "tioe_class_deprecated"
   | "invalid_polarity"
   | "invalid_delay_type"
   | "negative_delay"
@@ -55,7 +55,6 @@ export interface ValidationIssue {
 }
 
 const NODE_TYPES = new Set<NodeType>(["stock", "flow", "auxiliary"]);
-const TIOE_CLASSES = new Set<TioeClass>(["T", "I", "OE", "none"]);
 const POLARITIES = new Set<Polarity>(["+", "-"]);
 const DELAY_TYPES = new Set(["none", "material", "information", "perception"]);
 const COLLAR_APPROACHES = new Set<CollarApproach>(["hard", "soft"]);
@@ -119,10 +118,10 @@ function validateNode(node: unknown, seen: Set<string>): ValidationIssue[] {
   if (n.type === undefined || !NODE_TYPES.has(n.type)) {
     issues.push({ code: "invalid_node_type", message: `node "${n.id}" has invalid type`, ref: n.id });
   }
-  if (n.tioe_class === undefined || !TIOE_CLASSES.has(n.tioe_class)) {
+  if (n.boundary !== undefined && typeof n.boundary !== "boolean") {
     issues.push({
-      code: "invalid_tioe_class",
-      message: `node "${n.id}" has invalid tioe_class`,
+      code: "invalid_boundary",
+      message: `node "${n.id}" boundary must be a boolean`,
       ref: n.id,
     });
   }
@@ -153,6 +152,15 @@ function validateNode(node: unknown, seen: Set<string>): ValidationIssue[] {
     issues.push({
       code: "collar_ambiguous_units",
       message: `node "${n.id}" uses legacy flat lower_collar/upper_collar fields. Restate as: collar: { lower: <physical>, upper: <physical> } in the same units as initial_value.`,
+      ref: n.id,
+    });
+  }
+  // Detect legacy tioe_class field (pre-Phase-3 hand-authored tag).
+  // T/I/OE are now derived from the system boundary + topology, not annotated.
+  if (raw.tioe_class !== undefined) {
+    issues.push({
+      code: "tioe_class_deprecated",
+      message: `node "${n.id}" uses the deprecated tioe_class field. T/I/OE are now derived from the system boundary. Remove tioe_class and use boundary: true on nodes that are the system's interface with its environment (exogenous drivers are auto-detected).`,
       ref: n.id,
     });
   }

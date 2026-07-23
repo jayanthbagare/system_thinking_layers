@@ -43,6 +43,7 @@
  */
 
 import type { Edge, Graph, Node } from "@/model/types";
+import { computeBoundary } from "@/model/boundary";
 
 export type IntegratorMethod = "euler" | "rk4";
 
@@ -409,23 +410,96 @@ export function headroom(node: Node, value: number): number | null {
   return Math.max(0, Math.min(1, (c.upper - value) / span));
 }
 
-/** T/I/OE aggregation by tag (the L3 fallback; Phase 3 derives this properly). */
+/**
+ * T/I/OE snapshot — derived from the system boundary + topology (Phase 3),
+ * NOT from a hand-authored tag. See `deriveTioe` for the derivation rules.
+ */
 export interface TioeSnapshot {
   T: number;
   I: number;
   OE: number;
 }
 
-export function tioeOf(graph: Graph, state: SimState): TioeSnapshot {
-  let T = 0;
-  let I = 0;
-  let OE = 0;
-  for (const n of graph.nodes) {
-    const v = state.values[n.id] ?? 0;
-    if (n.tioe_class === "T") T += v;
-    else if (n.tioe_class === "I") I += v;
-    else if (n.tioe_class === "OE") OE += v;
+/**
+ * Derive Throughput / Inventory / Operating Expense from the graph topology +
+ * system boundary + simulation state. This replaces the Phase-1 `tioeOf`
+ * fallback that summed values by a hand-authored `tioe_class` tag.
+ *
+ * Derivation (Theory of Constraints, adapted for a flow model):
+ *
+ *   - **T (Throughput)** — the rate at which the system exchanges value with
+ *     its environment. This is the sum of absolute rates on boundary-crossing
+ *     edges. For a model with outbound edges (inside → boundary), T = sum of
+ *     those rates (the system delivering to the market). For a model with only
+ *     inbound edges (boundary → inside, e.g. demand driving the system), T =
+ *     the inbound rate — the demand rate IS the throughput target. When both
+ *     exist, T = outbound rate (actual delivery), and the inbound rate is a
+ *     separate observable (target throughput).
+ *
+ *   - **I (Inventory / Investment)** — the total mass tied up inside the
+ *     system: sum of all inside stock values + all material resident in delay
+ *     queues of edges between inside nodes. This is the "investment" the
+ *     system carries to generate throughput.
+ *
+ *   - **OE (Operating Expense)** — the rate of resource consumption at
+ *     constrained resources. This is the sum of incoming edge rates to collared
+ *     stock nodes (nodes with a `collar` block — they have a physical capacity
+ *     limit). The flow through a constrained resource is the cost of operating
+ *     it. If no nodes are collared, OE = 0 — the model does not represent a
+ *     capacity cost.
+ *
+ * All three are derived, not annotated. The boundary is computed from the
+ * graph (see `src/model/boundary.ts`); the stock/queue mass and edge rates
+ * are read from the simulation state.
+ */
+export function deriveTioe(graph: Graph, state: SimState): TioeSnapshot {
+  const boundary = computeBoundary(graph);
+
+  // --- T (Throughput) ---
+  // Prefer outbound boundary-crossing rates (system delivering to market).
+  // If none, use inbound rates (demand driving the system = target throughput).
+  let outboundT = 0;
+  let inboundT = 0;
+  for (const e of graph.edges) {
+    const srcIn = !boundary.has(e.source);
+    const tgtIn = !boundary.has(e.target);
+    if (srcIn && !tgtIn) {
+      outboundT += Math.abs(edgeRate(e, state.values));
+    } else if (!srcIn && tgtIn) {
+      inboundT += Math.abs(edgeRate(e, state.values));
+    }
   }
+  const T = outboundT > 0 ? outboundT : inboundT;
+
+  // --- I (Inventory / Investment) ---
+  // Sum of inside stock values + in-flight queue mass of edges whose target
+  // is inside (material heading into or within the system). Edges between two
+  // boundary nodes are entirely outside the system.
+  let I = 0;
+  for (const n of graph.nodes) {
+    if (boundary.has(n.id)) continue;
+    if (n.type === "stock") I += state.values[n.id] ?? 0;
+  }
+  for (const e of graph.edges) {
+    if (boundary.has(e.target)) continue;
+    const q = state.delayQueues[e.id];
+    if (q) for (const v of q) I += v;
+  }
+
+  // --- OE (Operating Expense) ---
+  // Sum of incoming edge rates to collared stock nodes (constrained resources).
+  // The flow through a constraint = the rate at which its capacity is consumed.
+  let OE = 0;
+  const incomingByNode = groupIncoming(graph);
+  for (const n of graph.nodes) {
+    if (boundary.has(n.id)) continue;
+    if (n.type !== "stock" || !n.collar) continue;
+    for (const e of incomingByNode.get(n.id) ?? []) {
+      if (boundary.has(e.source)) continue;
+      OE += Math.abs(edgeRate(e, state.values));
+    }
+  }
+
   return { T, I, OE };
 }
 

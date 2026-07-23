@@ -25,9 +25,9 @@ const DT_DEFAULT = 0.1;
 const DELTA_DEFAULT = 50;
 
 const TIOE_META: { key: "T" | "I" | "OE"; label: string; description: string }[] = [
-  { key: "T", label: "Throughput", description: "Sum of nodes tagged T" },
-  { key: "I", label: "Investment / Inventory", description: "Sum of nodes tagged I" },
-  { key: "OE", label: "Operating Expense", description: "Sum of nodes tagged OE" },
+  { key: "T", label: "Throughput", description: "Rate of flow across the system boundary (outbound delivery, or inbound demand when no outbound edges exist)" },
+  { key: "I", label: "Inventory / Investment", description: "Total stock mass + in-flight material inside the system boundary" },
+  { key: "OE", label: "Operating Expense", description: "Flow through constrained resources (collared stocks) inside the system" },
 ];
 
 export class Layer3Panel {

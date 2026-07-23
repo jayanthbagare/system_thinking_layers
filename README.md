@@ -71,7 +71,8 @@ unfamiliar.
 | **Flow**                 | A node that is a rate of change — like the faucet filling the tank. Examples: order rate, production rate.                                                                                                                                                                                             |
 | **Auxiliary**            | A helper node that is neither a stock nor a flow — just a converter or constant.                                                                                                                                                                                                                       |
 | **Constraint**           | A bottleneck: a node where many loops converge and delays pile up. Moving a constraint tends to shift the whole system's behavior.                                                                                                                                                                     |
-| **T / I / OE**           | Three financial-flavored categories for Layer 3: **T** = Throughput (revenue-generating rate), **I** = Investment / Inventory (tied-up resources), **OE** = Operating Expense (ongoing cost). These come from the Theory of Constraints.                                                               |
+| **T / I / OE**           | Three financial-flavored categories for Layer 3, **derived from the system boundary + topology** (not hand-authored): **T** = Throughput (rate of flow across the system boundary), **I** = Investment / Inventory (total stock mass + in-flight material inside the system), **OE** = Operating Expense (flow through constrained resources inside the system). These come from the Theory of Constraints. |
+| **System boundary**       | The set of nodes that are the system's interface with its environment (market demand, supplier inputs, customer outputs). Authored as `boundary: true` on a node; auto-derived from exogenous nodes (no incoming edges) when no explicit boundary is set. T/I/OE are derived from this inside/outside distinction. |
 | **Heat overlay**         | Coloring the nodes by score — cool blue for low scores, red for high scores — so the likely bottleneck stands out visually.                                                                                                                                                                            |
 | **Sparkline**            | A tiny line chart showing how a value changes over time. No axis labels; just the shape.                                                                                                                                                                                                               |
 | **Signal**               | A pulse that travels along an edge carrying a value change. When you nudge a node, a signal rides every outgoing arrow; when it lands, the target node's value shifts and a fresh signal rides onward. This is the live "running the network" animation — reinforcing loops amplify the pulse, balancing loops dampen it. |
@@ -270,14 +271,14 @@ demand wiggle at one end becomes a giant whip crack at the other.
 
 ### The six nodes in the model
 
-| Node                | What it represents                              | Type  | T/I/OE                 |
-| ------------------- | ----------------------------------------------- | ----- | ---------------------- |
-| Customer Demand     | The rate at which customers buy beer            | Flow  | T (Throughput)         |
-| Retailer Backlog    | Unfilled orders at the retailer (accumulates)   | Stock | I (Inventory)          |
-| Retailer Orders     | The rate at which the retailer places orders    | Flow  | T (Throughput)         |
-| Wholesaler Backlog  | Unfilled orders at the wholesaler (accumulates) | Stock | I (Inventory)          |
-| Wholesaler Orders   | The rate at which the wholesaler places orders  | Flow  | T (Throughput)         |
-| Production Capacity | How fast production can supply (accumulates)    | Stock | OE (Operating Expense) |
+| Node                | What it represents                              | Type  | Boundary / Derived role                      |
+| ------------------- | ----------------------------------------------- | ----- | -------------------------------------------- |
+| Customer Demand     | The rate at which customers buy beer            | Flow  | **Boundary** (system's interface with market) |
+| Retailer Backlog    | Unfilled orders at the retailer (accumulates)   | Stock | Inside → contributes to I (Inventory)         |
+| Retailer Orders     | The rate at which the retailer places orders    | Flow  | Inside → contributes to I (in-flight queue)   |
+| Wholesaler Backlog  | Unfilled orders at the wholesaler (accumulates) | Stock | Inside → contributes to I (Inventory)         |
+| Wholesaler Orders   | The rate at which the wholesaler places orders  | Flow  | Inside → contributes to I (in-flight queue)   |
+| Production Capacity | How fast production can supply (accumulates)    | Stock | Inside → contributes to I; collar → OE (flow through constraint) |
 
 ### The seven edges (arrows)
 
@@ -420,7 +421,7 @@ opens a modal dialog showing every editable field of that node:
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | **Label**             | The human-readable name shown on the diagram.                                                                              |
 | **Type**              | `stock`, `flow`, or `auxiliary` (see glossary).                                                                            |
-| **TIOE class**        | `T`, `I`, `OE`, or `none` — the Layer 3 financial category.                                                                |
+| **System boundary**   | When checked, this node is the system's interface with its environment (market demand, supplier input, customer output). T/I/OE are derived from the boundary + topology. |
 | **Initial value**     | The starting value for quantitative simulation.                                                                             |
 | **Unit**              | The unit of measurement (e.g., "units/week").                                                                              |
 | **Collar lower (physical)** | The lower bound for the node's value, in the node's own units. The engine clamps the value to stay at or above this.       |
@@ -681,11 +682,11 @@ and the relative magnitude; do not trust the absolute numbers.
 
 #### The sparklines
 
-Three small charts, one for each T/I/OE category:
+Three small charts, one for each T/I/OE category. These are **derived from the system boundary + topology**, not from hand-authored tags:
 
-- **T · Throughput** — the sum of all nodes tagged `T`.
-- **I · Investment / Inventory** — the sum of all nodes tagged `I`.
-- **OE · Operating Expense** — the sum of all nodes tagged `OE`.
+- **T · Throughput** — the rate of flow across the system boundary (outbound delivery to the market, or inbound demand when no outbound edges exist).
+- **I · Inventory / Investment** — the total stock mass + in-flight material inside the system boundary.
+- **OE · Operating Expense** — the flow through constrained resources (collared stocks) inside the system.
 
 Each sparkline shows two lines:
 
@@ -981,7 +982,7 @@ nodes:
   - id: <unique-id>
     label: <human-readable name>
     type: <stock | flow | auxiliary>
-    tioe_class: <T | I | OE | none>
+    boundary: <true | false>   # optional: marks the system's interface with its environment
     initial_value: <number>
     unit: <string>
     lower_collar: <deprecated — use collar: block>
@@ -1009,7 +1010,6 @@ nodes:
   - id: workload
     label: Workload
     type: stock
-    tioe_class: I
     initial_value: 100
     unit: tasks
     collar: { lower: 0, upper: 200 }
@@ -1017,14 +1017,12 @@ nodes:
   - id: hiring_rate
     label: Hiring Rate
     type: flow
-    tioe_class: OE
     initial_value: 5
     unit: people/week
 
   - id: capacity
     label: Team Capacity
     type: stock
-    tioe_class: T
     initial_value: 10
     unit: people
 ```
@@ -1090,7 +1088,7 @@ content and restart the dev server. For details on the programmatic API
 | `id`            | **yes**   | string                         | —                  | A unique identifier (no spaces, use underscores).                                        |
 | `label`         | no        | string                         | falls back to `id` | The human-readable name shown on the diagram.                                            |
 | `type`          | no        | `stock` / `flow` / `auxiliary` | `auxiliary`        | Whether the node accumulates (stock), is a rate (flow), or is a helper (auxiliary).      |
-| `tioe_class`    | no        | `T` / `I` / `OE` / `none`      | `none`             | The Layer 3 financial category.                                                          |
+| `boundary`      | no        | boolean                        | auto (exogenous)   | When `true`, this node is the system's interface with its environment. T/I/OE are derived from the boundary + topology. Auto-derived: nodes with no incoming edges are boundary if no explicit `boundary: true` is set. |
 | `initial_value` | no        | number                         | `0`                | The starting value for simulation.                                                       |
 | `unit`          | no        | string                         | `""`               | The unit of measurement (e.g., "units", "units/week").                                   |
 | `collar`       | no        | `{ lower?, upper?, approach? }` | omitted (unbounded) | Physical bounds on the node's value, in the same units as `initial_value`. Enforced inside the simulation engine with anti-windup and backpressure. `approach` is `hard` (default) or `soft` (Phase 7). |
@@ -1136,7 +1134,9 @@ of them at once (not just the first). Common issues:
 | `edge_unknown_source` / `edge_unknown_target` | An edge references a node `id` that does not exist.                    |
 | `edge_self_loop`                              | An edge points from a node back to itself. Self-loops are not allowed. |
 | `duplicate_edge`                              | Two edges have the same source and target.                             |
-| `invalid_node_type` / `invalid_tioe_class`    | The `type` or `tioe_class` value is not one of the allowed options.    |
+| `invalid_node_type`                           | The `type` value is not one of the allowed options.                     |
+| `invalid_boundary`                            | The `boundary` field is not a boolean.                                 |
+| `tioe_class_deprecated`                       | Legacy `tioe_class` field present. T/I/OE are now derived from the system boundary. Remove `tioe_class` and use `boundary: true` on environment-interface nodes. |
 | `invalid_polarity` / `invalid_delay_type`     | The `polarity` or `delay.type` value is not recognized.                |
 | `negative_delay` / `negative_strength`        | A delay magnitude or strength is negative.                             |
 | `collar_ambiguous_units`                     | Legacy flat `lower_collar`/`upper_collar` fields present. Restate in the `collar:` block with physical units. |

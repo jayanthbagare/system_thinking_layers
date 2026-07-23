@@ -14,7 +14,7 @@ function loadFixture(name: string): Graph {
 }
 
 function node(id: string, label = id): Node {
-  return { id, label, type: "stock", tioe_class: "none", initial_value: 0, unit: "u" };
+  return { id, label, type: "stock", initial_value: 0, unit: "u" };
 }
 
 function edge(

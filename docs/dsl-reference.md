@@ -11,7 +11,6 @@ nodes:
   - id: backlog
     label: Order Backlog
     type: stock
-    tioe_class: I
     initial_value: 0
     unit: units
 edges:
@@ -41,7 +40,7 @@ A working fixture lives at
 | `id` | yes | string | — |
 | `label` | no | string | falls back to `id` |
 | `type` | no | `stock` \| `flow` \| `auxiliary` | `auxiliary` |
-| `tioe_class` | no | `T` \| `I` \| `OE` \| `none` | `none` |
+| `boundary` | no | `true` \| `false` | auto (exogenous) | Marks the node as the system's interface with its environment. T/I/OE are derived from the boundary + topology. Auto-derived: nodes with no incoming edges are boundary when no explicit `boundary: true` is set. |
 | `initial_value` | no | number | `0` |
 | `unit` | no | string | `""` |
 | `collar` | no | object (below) | omitted (unbounded) |

@@ -13,14 +13,14 @@
  * mutates `Graph` itself.
  */
 
-import type { Collar, Graph, Node, NodeType, TioeClass } from "@/model/types";
+import type { Collar, Graph, Node, NodeType } from "@/model/types";
 import { validate } from "@/model/validate";
 
 /** A node's editable fields, as collected from the modal form. */
 export interface NodeEditPatch {
   label: string;
   type: NodeType;
-  tioe_class: TioeClass;
+  boundary: boolean;
   initial_value: number;
   unit: string;
   collar?: Collar;
@@ -35,7 +35,6 @@ export interface NodeEditPatch {
 }
 
 const NODE_TYPES: NodeType[] = ["stock", "flow", "auxiliary"];
-const TIOE_CLASSES: TioeClass[] = ["T", "I", "OE", "none"];
 
 /**
  * Open the edit modal for `node` against `graph`. Returns the dialog element
@@ -60,7 +59,7 @@ export function openEditModal(
   form.append(titleRow(node));
   form.append(fieldRow("Label", textInput("label", node.label)));
   form.append(fieldRow("Type", selectInput("type", NODE_TYPES, node.type)));
-  form.append(fieldRow("TIOE class", selectInput("tioe_class", TIOE_CLASSES, node.tioe_class)));
+  form.append(fieldRow("System boundary", boundaryRow(node.boundary ?? false)));
   form.append(fieldRow("Initial value", numberInput("initial_value", node.initial_value)));
   form.append(fieldRow("Unit", textInput("unit", node.unit)));
   form.append(
@@ -219,6 +218,21 @@ function pinRow(x: number, y: number, pinned: boolean): HTMLElement {
   return wrap;
 }
 
+function boundaryRow(checked: boolean): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "edit-modal-boundary-row";
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.name = "boundary";
+  check.checked = checked;
+  check.className = "edit-modal-input";
+  const hint = document.createElement("span");
+  hint.className = "edit-modal-hint";
+  hint.textContent = "Mark if this node is the system's interface with its environment (T/I/OE are derived from the boundary)";
+  wrap.append(check, hint);
+  return wrap;
+}
+
 function agentBindingRow(ruleId: string): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "edit-modal-binding-row";
@@ -249,7 +263,7 @@ function collectPatch(form: HTMLFormElement, original: Node): NodeEditPatch {
   const patch: NodeEditPatch = {
     label: String(fd.get("label") ?? "").trim(),
     type: String(fd.get("type")) as NodeType,
-    tioe_class: String(fd.get("tioe_class")) as TioeClass,
+    boundary: fd.get("boundary") === "on",
     initial_value: Number(fd.get("initial_value")),
     unit: String(fd.get("unit") ?? "").trim(),
   };
@@ -285,9 +299,9 @@ function validatePatch(node: Node, patch: NodeEditPatch, graph: Graph): string |
     id: node.id,
     label: patch.label,
     type: patch.type,
-    tioe_class: patch.tioe_class,
     initial_value: patch.initial_value,
     unit: patch.unit,
+    ...(patch.boundary ? { boundary: true } : {}),
     ...(patch.collar ? { collar: patch.collar } : {}),
     ...(patch.pin ? { pin: patch.pin } : {}),
     ...(patch.agent_binding ? { agent_binding: patch.agent_binding } : {}),

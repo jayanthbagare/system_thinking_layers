@@ -19,7 +19,7 @@ import {
   initialState,
   run,
   impulse,
-  tioeOf,
+  deriveTioe,
   type EngineOptions,
   type IntegratorMethod,
   type SimState,
@@ -99,7 +99,7 @@ function applyIntervention(state: SimState, iv: Intervention): SimState {
 }
 
 function toTrajectory(graph: Graph, states: SimState[]): Trajectory {
-  const series: TioeSnapshot[] = states.map((s) => tioeOf(graph, s));
+  const series: TioeSnapshot[] = states.map((s) => deriveTioe(graph, s));
   const times: number[] = states.map((s) => s.t);
   return { series, times };
 }

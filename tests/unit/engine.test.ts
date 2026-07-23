@@ -4,6 +4,7 @@ import {
   DEFAULT_ENGINE_OPTIONS,
   computeSlots,
   degreesOfFreedom,
+  deriveTioe,
   equilibrium,
   headroom,
   impulse,
@@ -11,17 +12,16 @@ import {
   run,
   setValue,
   step,
-  tioeOf,
   totalMass,
   type EngineOptions,
 } from "@/sim/engine";
 import { computeSensitivities, normalizedSensitivities } from "@/sim/sensitivity";
 
-function stock(id: string, value = 0, tioe: Node["tioe_class"] = "none"): Node {
-  return { id, label: id, type: "stock", tioe_class: tioe, initial_value: value, unit: "u" };
+function stock(id: string, value = 0): Node {
+  return { id, label: id, type: "stock", initial_value: value, unit: "u" };
 }
-function flow(id: string, value = 0, tioe: Node["tioe_class"] = "none"): Node {
-  return { id, label: id, type: "flow", tioe_class: tioe, initial_value: value, unit: "u" };
+function flow(id: string, value = 0): Node {
+  return { id, label: id, type: "flow", initial_value: value, unit: "u" };
 }
 function edge(
   id: string,
@@ -250,23 +250,75 @@ describe("equilibrium", () => {
   });
 });
 
-describe("tioeOf", () => {
-  it("aggregates node values by tioe_class", () => {
+describe("deriveTioe", () => {
+  it("T = rate on inbound boundary edge when no outbound edges exist", () => {
+    // customer_demand (boundary, flow=100) -> retailer_backlog (inside, stock=0)
+    // T = inbound rate = 100 * 1 = 100
     const g: Graph = {
-      nodes: [
-        stock("a", 10, "T"),
-        stock("b", 5, "I"),
-        stock("c", 3, "OE"),
-        stock("d", 2, "T"),
-        stock("e", 1, "none"),
-      ],
-      edges: [],
+      nodes: [flow("demand", 100), stock("backlog", 0)],
+      edges: [edge("e1", "demand", "backlog", { strength: 1 })],
       loops: [],
     };
-    const snap = tioeOf(g, initialState(g, opts()));
-    expect(snap.T).toBe(12);
-    expect(snap.I).toBe(5);
-    expect(snap.OE).toBe(3);
+    // Mark demand as boundary explicitly.
+    g.nodes[0].boundary = true;
+    const snap = deriveTioe(g, initialState(g, opts()));
+    expect(snap.T).toBeCloseTo(100, 6);
+  });
+
+  it("I = sum of inside stock values + inside queue mass", () => {
+    // demand (boundary) -> backlog (inside, stock, delay 1)
+    // I = backlog value + queue contents of e1
+    const g: Graph = {
+      nodes: [flow("demand", 100), stock("backlog", 0)],
+      edges: [edge("e1", "demand", "backlog", { magnitude: 1, strength: 1 })],
+      loops: [],
+    };
+    g.nodes[0].boundary = true;
+    const o = opts({ dt: 0.25 });
+    const s = initialState(g, o);
+    // Queue has 4 slots * 25 = 100. Stock = 0. I = 0 + 100 = 100.
+    const snap = deriveTioe(g, s);
+    expect(snap.I).toBeCloseTo(100, 6);
+  });
+
+  it("OE = flow through collared stock nodes inside the system", () => {
+    // demand (boundary) -> orders (inside, flow) -> capacity (inside, stock, collared)
+    // OE = rate of incoming edge to the collared stock = orders value * strength
+    const g: Graph = {
+      nodes: [flow("demand", 100), flow("orders", 100), stock("capacity", 100)],
+      edges: [
+        edge("e1", "demand", "orders", { strength: 1 }),
+        edge("e2", "orders", "capacity", { strength: 1 }),
+      ],
+      loops: [],
+    };
+    g.nodes[0].boundary = true;
+    g.nodes[2].collar = { lower: 0, upper: 120 };
+    const snap = deriveTioe(g, initialState(g, opts()));
+    // OE = rate(e2) = 1 * orders_value = 100
+    expect(snap.OE).toBeCloseTo(100, 6);
+  });
+
+  it("OE = 0 when no collared stocks exist inside the system", () => {
+    const g: Graph = {
+      nodes: [flow("demand", 100), stock("backlog", 0)],
+      edges: [edge("e1", "demand", "backlog", { strength: 1 })],
+      loops: [],
+    };
+    g.nodes[0].boundary = true;
+    const snap = deriveTioe(g, initialState(g, opts()));
+    expect(snap.OE).toBe(0);
+  });
+
+  it("boundary auto-derives from exogenous nodes when no explicit boundary is set", () => {
+    // demand has no incoming edges -> auto-boundary. backlog has incoming -> inside.
+    const g: Graph = {
+      nodes: [flow("demand", 100), stock("backlog", 0)],
+      edges: [edge("e1", "demand", "backlog", { strength: 1 })],
+      loops: [],
+    };
+    const snap = deriveTioe(g, initialState(g, opts()));
+    expect(snap.T).toBeCloseTo(100, 6);
   });
 });
 
@@ -325,7 +377,7 @@ describe("default options", () => {
 // --- Phase 2: collars made physical ----------------------------------------
 
 function collaredStock(id: string, value: number, lower?: number, upper?: number): Node {
-  const n: Node = { id, label: id, type: "stock", tioe_class: "none", initial_value: value, unit: "u" };
+  const n: Node = { id, label: id, type: "stock", initial_value: value, unit: "u" };
   if (lower !== undefined || upper !== undefined) {
     n.collar = {};
     if (lower !== undefined) n.collar.lower = lower;

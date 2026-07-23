@@ -7,9 +7,9 @@ function n(partial: Partial<Node>): Node {
     id: partial.id ?? "n1",
     label: partial.label ?? "n1",
     type: partial.type ?? "stock",
-    tioe_class: partial.tioe_class ?? "none",
     initial_value: partial.initial_value ?? 0,
     unit: partial.unit ?? "u",
+    ...(partial.boundary !== undefined ? { boundary: partial.boundary } : {}),
     ...("pin" in partial ? { pin: partial.pin } : {}),
     ...("collar" in partial ? { collar: partial.collar } : {}),
     ...("agent_binding" in partial ? { agent_binding: partial.agent_binding } : {}),
@@ -71,11 +71,29 @@ describe("validate", () => {
     expect(validate(g).some((i) => i.code === "duplicate_edge")).toBe(true);
   });
 
-  it("rejects invalid node type and tioe_class", () => {
-    const bad = n({ id: "a", type: "widget" as Node["type"], tioe_class: "Z" as Node["tioe_class"] });
+  it("rejects invalid node type", () => {
+    const bad = n({ id: "a", type: "widget" as Node["type"] });
     const codes = validate(graph([bad], [])).map((i) => i.code);
     expect(codes).toContain("invalid_node_type");
-    expect(codes).toContain("invalid_tioe_class");
+  });
+
+  it("rejects non-boolean boundary", () => {
+    const raw = { id: "a", label: "a", type: "stock", boundary: "yes", initial_value: 0, unit: "u" };
+    const codes = validate({ nodes: [raw], edges: [], loops: [] }).map((i) => i.code);
+    expect(codes).toContain("invalid_boundary");
+  });
+
+  it("fires tioe_class_deprecated for legacy tioe_class field", () => {
+    const raw = {
+      id: "a",
+      label: "a",
+      type: "stock",
+      tioe_class: "T",
+      initial_value: 0,
+      unit: "u",
+    };
+    const issues = validate({ nodes: [raw], edges: [], loops: [] });
+    expect(issues.some((i) => i.code === "tioe_class_deprecated" && i.ref === "a")).toBe(true);
   });
 
   it("rejects invalid polarity and delay type", () => {
@@ -97,7 +115,7 @@ describe("validate", () => {
 
   it("collects ALL violations, not just the first", () => {
     const g = graph(
-      [n({ id: "a", type: "bad" as Node["type"] }), n({ id: "a", tioe_class: "Z" as Node["tioe_class"] })],
+      [n({ id: "a", type: "bad" as Node["type"] }), n({ id: "a", type: "bad" as Node["type"] })],
       [],
     );
     expect(validate(g).length).toBeGreaterThan(1);
@@ -138,7 +156,6 @@ describe("validate", () => {
       id: "a",
       label: "a",
       type: "stock",
-      tioe_class: "none",
       initial_value: 50,
       unit: "u",
       lower_collar: 0.2,
@@ -153,7 +170,6 @@ describe("validate", () => {
       id: "a",
       label: "a",
       type: "stock",
-      tioe_class: "none",
       initial_value: 50,
       unit: "u",
       upper_collar: 0.9,

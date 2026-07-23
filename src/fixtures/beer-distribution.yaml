@@ -12,19 +12,22 @@
 # the system's real constraint). Backlogs have a lower bound of 0 (can't be
 # negative) but NO upper collar — a backlog has no ceiling in this model, and
 # inventing one was an artefact of the old normalized framing.
+#
+# The system boundary is marked on customer_demand — it is the system's
+# interface with the market (exogenous demand). T/I/OE are derived from
+# this boundary + the topology, not hand-authored via tioe_class tags.
 
 nodes:
   - id: customer_demand
     label: Customer Demand
     type: flow
-    tioe_class: T
+    boundary: true
     initial_value: 100
     unit: units/week
 
   - id: retailer_backlog
     label: Retailer Backlog
     type: stock
-    tioe_class: I
     initial_value: 0
     unit: units
     collar: { lower: 0 }
@@ -32,14 +35,12 @@ nodes:
   - id: retailer_orders
     label: Retailer Orders
     type: flow
-    tioe_class: T
     initial_value: 100
     unit: units/week
 
   - id: wholesaler_backlog
     label: Wholesaler Backlog
     type: stock
-    tioe_class: I
     initial_value: 0
     unit: units
     collar: { lower: 0 }
@@ -47,14 +48,12 @@ nodes:
   - id: wholesaler_orders
     label: Wholesaler Orders
     type: flow
-    tioe_class: T
     initial_value: 100
     unit: units/week
 
   - id: production_capacity
     label: Production Capacity
     type: stock
-    tioe_class: OE
     initial_value: 100
     unit: units/week
     collar: { lower: 0, upper: 120 }

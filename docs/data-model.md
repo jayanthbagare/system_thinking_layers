@@ -14,7 +14,7 @@ Node {
   id: string
   label: string
   type: "stock" | "flow" | "auxiliary"   // stock-flow semantics, not just a CLD box
-  tioe_class: "T" | "I" | "OE" | "none"  // Layer 3 tag
+  boundary?: boolean                      // system boundary: the node is the system's port to its environment
   initial_value: number
   unit: string
   collar?: Collar                         // physical bounds, same units as initial_value
@@ -39,6 +39,14 @@ collar is a fact about the system in the system's own units — not a display
 clamp. Legacy flat `lower_collar`/`upper_collar` fields (normalized [0,1]) are
 rejected at parse time with `collar_ambiguous_units`; authors must restate them
 in the `collar:` block with physical units.
+
+`boundary` marks a node as the system's interface with its environment (market
+demand, supplier inputs, customer outputs). When no node has `boundary: true`,
+the boundary is auto-derived: nodes with no incoming edges (exogenous drivers)
+are treated as boundary. T/I/OE are **derived** from the boundary + topology
+(see `deriveTioe` in `src/sim/engine.ts`), not hand-authored via a `tioe_class`
+tag. Legacy `tioe_class` fields are rejected at parse time with
+`tioe_class_deprecated`.
 
 ## Edge
 
@@ -102,7 +110,8 @@ problems in one pass. A `Graph` is valid iff `validate(graph)` returns `[]`.
 | `edge_unknown_source` / `edge_unknown_target` | edges reference existing nodes |
 | `edge_self_loop` | an edge's source and target differ |
 | `duplicate_edge` | no two edges share the same `source -> target` pair |
-| `invalid_node_type` / `invalid_tioe_class` | enums respected |
+| `invalid_node_type` / `invalid_boundary` | enums / boolean respected |
+| `tioe_class_deprecated` | legacy `tioe_class` field present — use `boundary` instead |
 | `invalid_polarity` / `invalid_delay_type` | enums respected |
 | `negative_delay` / `negative_strength` | magnitudes and weights are non-negative |
 | `loop_sign_mismatch` | if loops are carried at load time, their sign must match edge polarities |

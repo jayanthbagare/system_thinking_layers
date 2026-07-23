@@ -5,7 +5,7 @@ import { loadSession, saveSession } from "@/io/session";
 import type { Weights } from "@/layer2/scoring";
 
 function node(id: string): Node {
-  return { id, label: id, type: "stock", tioe_class: "none", initial_value: 0, unit: "u" };
+  return { id, label: id, type: "stock", initial_value: 0, unit: "u" };
 }
 
 function edge(id: string, source: string, target: string): Edge {
@@ -63,7 +63,6 @@ describe("session save/load round-trip", () => {
             id: "a",
             label: "A",
             type: "stock",
-            tioe_class: "none",
             initial_value: 0,
             unit: "u",
             __proto__: { evil: true },

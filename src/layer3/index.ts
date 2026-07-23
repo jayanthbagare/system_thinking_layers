@@ -16,7 +16,7 @@ export {
   step,
   impulse,
   setValue,
-  tioeOf,
+  deriveTioe,
   totalMass,
   equilibrium,
   type EngineOptions,

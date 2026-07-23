@@ -67,12 +67,13 @@ edges: []
 
   it("accepts JSON as well as YAML", () => {
     const json = JSON.stringify({
-      nodes: [{ id: "a", label: "A", type: "stock", tioe_class: "T", initial_value: 1, unit: "u" }],
+      nodes: [{ id: "a", label: "A", type: "stock", boundary: true, initial_value: 1, unit: "u" }],
       edges: [],
     });
     const { graph, issues } = parseGraph(json);
     expect(issues).toEqual([]);
     expect(graph!.nodes).toHaveLength(1);
+    expect(graph!.nodes[0].boundary).toBe(true);
   });
 
   it("applies sensible defaults for omitted optional fields", () => {
@@ -88,7 +89,7 @@ edges:
     const { graph, issues } = parseGraph(minimal);
     expect(issues).toEqual([]);
     expect(graph!.nodes[0].type).toBe("auxiliary");
-    expect(graph!.nodes[0].tioe_class).toBe("none");
+    expect(graph!.nodes[0].boundary).toBeUndefined();
     expect(graph!.edges[0].strength).toBe(1);
     expect(graph!.edges[0].delay.type).toBe("none");
   });
@@ -98,7 +99,7 @@ edges:
 nodes:
   - id: a
     type: widget
-    tioe_class: Z
+    tioe_class: T
   - id: a
 edges:
   - id: e1
@@ -113,7 +114,7 @@ edges:
     const codes = issues.map((i) => i.code);
     expect(codes).toContain("duplicate_node_id");
     expect(codes).toContain("invalid_node_type");
-    expect(codes).toContain("invalid_tioe_class");
+    expect(codes).toContain("tioe_class_deprecated");
     expect(codes).toContain("edge_unknown_target");
     expect(codes).toContain("invalid_polarity");
     expect(codes).toContain("invalid_delay_type");

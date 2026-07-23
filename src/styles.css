@@ -856,13 +856,20 @@ dialog.edit-modal::backdrop {
   min-width: 4rem;
 }
 .edit-modal-pin-clear,
-.edit-modal-binding-clear {
+.edit-modal-binding-clear,
+.edit-modal-boundary-row {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 0.78rem;
   color: #555;
   white-space: nowrap;
+}
+.edit-modal-hint {
+  font-size: 0.75rem;
+  color: #777;
+  line-height: 1.3;
+  white-space: normal;
 }
 .edit-modal-error {
   color: var(--c-balancing);

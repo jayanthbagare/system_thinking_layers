@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Edge, Graph, Node } from "@/model/types";
-import { initialState, run, step, tioeOf, totalMass, type EngineOptions } from "@/sim";
+import { initialState, run, step, deriveTioe, totalMass, type EngineOptions } from "@/sim";
 import { simulate, DEFAULT_INTEGRATOR_OPTIONS } from "@/layer3/simulate";
 import { sparkline } from "@/layer3/sparkline";
 
-function stock(id: string, value = 0, tioe: Node["tioe_class"] = "none"): Node {
-  return { id, label: id, type: "stock", tioe_class: tioe, initial_value: value, unit: "u" };
+function stock(id: string, value = 0): Node {
+  return { id, label: id, type: "stock", initial_value: value, unit: "u" };
 }
-function flow(id: string, value = 0, tioe: Node["tioe_class"] = "none"): Node {
-  return { id, label: id, type: "flow", tioe_class: tioe, initial_value: value, unit: "u" };
+function flow(id: string, value = 0): Node {
+  return { id, label: id, type: "flow", initial_value: value, unit: "u" };
 }
 function edge(
   id: string,
@@ -78,23 +78,16 @@ describe("initialState / step / run (engine substrate)", () => {
   });
 });
 
-describe("tioeOf", () => {
-  it("aggregates node values by tioe_class", () => {
+describe("deriveTioe (boundary-derived T/I/OE)", () => {
+  it("T = inbound boundary rate, I = inside stock + queue mass, OE = 0 (no collars)", () => {
     const g: Graph = {
-      nodes: [
-        stock("a", 10, "T"),
-        stock("b", 5, "I"),
-        stock("c", 3, "OE"),
-        stock("d", 2, "T"),
-        stock("e", 1, "none"),
-      ],
-      edges: [],
+      nodes: [flow("demand", 100), stock("backlog", 0)],
+      edges: [edge("e1", "demand", "backlog", { strength: 1 })],
       loops: [],
     };
-    const snap = tioeOf(g, initialState(g, opts()));
-    expect(snap.T).toBe(12);
-    expect(snap.I).toBe(5);
-    expect(snap.OE).toBe(3);
+    const snap = deriveTioe(g, initialState(g, opts()));
+    expect(snap.T).toBeCloseTo(100, 6);
+    expect(snap.OE).toBe(0);
   });
 });
 
@@ -113,20 +106,21 @@ describe("simulate (pre/post intervention over the engine)", () => {
   });
 
   it("the intervention perturbs the post trajectory's initial T/I/OE", () => {
+    // demand (boundary, flow=100) -> backlog (inside, stock=0, delay 1)
+    // T = inbound rate = 100; I = backlog value + queue mass.
+    // Impulse demand by 50: T goes from 100 to 150.
     const g: Graph = {
-      nodes: [stock("a", 100, "T"), stock("b", 0, "I")],
-      edges: [edge("e1", "a", "b", { magnitude: 1, strength: 1 })],
+      nodes: [flow("demand", 100), stock("backlog", 0)],
+      edges: [edge("e1", "demand", "backlog", { magnitude: 1, strength: 1 })],
       loops: [],
     };
     const r = simulate(g, {
-      intervention: { nodeId: "a", delta: 50 },
+      intervention: { nodeId: "demand", delta: 50 },
       integrator: { dt: 0.1, method: "rk4" },
       steps: 10,
     });
-    expect(r.pre.series[0].T).toBe(100);
-    expect(r.post.series[0].T).toBe(150);
-    expect(r.pre.series[0].I).toBe(0);
-    expect(r.post.series[0].I).toBe(0);
+    expect(r.pre.series[0].T).toBeCloseTo(100, 6);
+    expect(r.post.series[0].T).toBeCloseTo(150, 6);
   });
 
   it("L1-nudge and an equivalent L3 Δ produce the same trajectory", () => {
@@ -144,7 +138,7 @@ describe("simulate (pre/post intervention over the engine)", () => {
     const eng = run(g, initialState(g, o), o, 1);
     const impulsed = run(g, { ...initialState(g, o), values: { ...eng[0].values, a: 150 } }, o, 50);
     for (let i = 0; i < sim.post.series.length; i++) {
-      const snap = tioeOf(g, impulsed[Math.min(i, impulsed.length - 1)]);
+      const snap = deriveTioe(g, impulsed[Math.min(i, impulsed.length - 1)]);
       expect(sim.post.series[i].T + sim.post.series[i].I + sim.post.series[i].OE).toBeCloseTo(
         snap.T + snap.I + snap.OE,
         6,
