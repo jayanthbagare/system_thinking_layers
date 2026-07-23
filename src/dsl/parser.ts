@@ -1,5 +1,5 @@
 import yaml from "js-yaml";
-import type { Graph, Node, Edge, NodeType, TioeClass, Polarity, DelayType } from "@/model/types";
+import type { Graph, Node, Edge, NodeType, TioeClass, Polarity, DelayType, CollarApproach, EdgeRange } from "@/model/types";
 import { validate, type ValidationIssue } from "@/model/validate";
 
 /**
@@ -79,8 +79,13 @@ export function serializeGraphYaml(graph: Graph): string {
     lines.push(`    tioe_class: ${yamlScalar(n.tioe_class)}`);
     lines.push(`    initial_value: ${num(n.initial_value)}`);
     lines.push(`    unit: ${yamlScalar(n.unit)}`);
-    if (n.lower_collar !== undefined) lines.push(`    lower_collar: ${num(n.lower_collar)}`);
-    if (n.upper_collar !== undefined) lines.push(`    upper_collar: ${num(n.upper_collar)}`);
+    if (n.collar) {
+      const parts: string[] = [];
+      if (n.collar.lower !== undefined) parts.push(`lower: ${num(n.collar.lower)}`);
+      if (n.collar.upper !== undefined) parts.push(`upper: ${num(n.collar.upper)}`);
+      if (n.collar.approach) parts.push(`approach: ${yamlScalar(n.collar.approach)}`);
+      if (parts.length > 0) lines.push(`    collar: { ${parts.join(", ")} }`);
+    }
     if (n.pin) {
       lines.push(`    pin: { x: ${num(n.pin.x)}, y: ${num(n.pin.y)} }`);
     }
@@ -96,6 +101,12 @@ export function serializeGraphYaml(graph: Graph): string {
     lines.push(`    polarity: ${yamlScalar(e.polarity)}`);
     lines.push(`    delay: { type: ${yamlScalar(e.delay.type)}, magnitude: ${num(e.delay.magnitude)} }`);
     lines.push(`    strength: ${num(e.strength)}`);
+    if (e.range) {
+      const parts: string[] = [];
+      if (e.range.strength) parts.push(`strength: [${num(e.range.strength[0])}, ${num(e.range.strength[1])}]`);
+      if (e.range.delay_magnitude) parts.push(`delay_magnitude: [${num(e.range.delay_magnitude[0])}, ${num(e.range.delay_magnitude[1])}]`);
+      if (parts.length > 0) lines.push(`    range: { ${parts.join(", ")} }`);
+    }
   }
   lines.push("");
   return lines.join("\n");
@@ -144,6 +155,7 @@ interface RawNode {
   unit?: string;
   lower_collar?: number;
   upper_collar?: number;
+  collar?: { lower?: number; upper?: number; approach?: string };
   agent_binding?: { rule_id?: string };
   pin?: { x?: number; y?: number };
 }
@@ -157,6 +169,7 @@ interface RawEdge {
   delay_type?: string;
   delay_magnitude?: number;
   strength?: number;
+  range?: { strength?: [number, number]; delay_magnitude?: [number, number] };
 }
 
 interface RawGraph {
@@ -181,11 +194,15 @@ function normalizeNode(r: RawNode): Node {
     r.agent_binding && typeof r.agent_binding.rule_id === "string"
       ? { rule_id: r.agent_binding.rule_id }
       : undefined;
-  const lower_collar =
-    typeof r.lower_collar === "number" && !Number.isNaN(r.lower_collar) ? r.lower_collar : undefined;
-  const upper_collar =
-    typeof r.upper_collar === "number" && !Number.isNaN(r.upper_collar) ? r.upper_collar : undefined;
-  return {
+  const collar =
+    r.collar && (typeof r.collar.lower === "number" || typeof r.collar.upper === "number")
+      ? {
+          ...(typeof r.collar.lower === "number" ? { lower: r.collar.lower } : {}),
+          ...(typeof r.collar.upper === "number" ? { upper: r.collar.upper } : {}),
+          ...(r.collar.approach ? { approach: r.collar.approach as CollarApproach } : {}),
+        }
+      : undefined;
+  const node: Node = {
     id: r.id ?? "",
     label: r.label ?? r.id ?? "",
     type: (r.type as NodeType) ?? "auxiliary",
@@ -193,15 +210,26 @@ function normalizeNode(r: RawNode): Node {
     initial_value: r.initial_value ?? 0,
     unit: r.unit ?? "",
     ...(pin ? { pin } : {}),
-    ...(lower_collar !== undefined ? { lower_collar } : {}),
-    ...(upper_collar !== undefined ? { upper_collar } : {}),
+    ...(collar ? { collar } : {}),
     ...(agent_binding ? { agent_binding } : {}),
   };
+  // Pass legacy flat fields through so the validator can flag them. These are
+  // NOT reinterpreted — the author must restate them in the collar: block.
+  if (typeof r.lower_collar === "number") (node as unknown as Record<string, unknown>).lower_collar = r.lower_collar;
+  if (typeof r.upper_collar === "number") (node as unknown as Record<string, unknown>).upper_collar = r.upper_collar;
+  return node;
 }
 
 function normalizeEdge(r: RawEdge): Edge {
   const delayType = (r.delay?.type ?? r.delay_type ?? "none") as DelayType;
   const delayMag = r.delay?.magnitude ?? r.delay_magnitude ?? 0;
+  const range: EdgeRange | undefined =
+    r.range && (r.range.strength || r.range.delay_magnitude)
+      ? {
+          ...(r.range.strength ? { strength: r.range.strength } : {}),
+          ...(r.range.delay_magnitude ? { delay_magnitude: r.range.delay_magnitude } : {}),
+        }
+      : undefined;
   return {
     id: r.id ?? "",
     source: r.source ?? "",
@@ -209,6 +237,7 @@ function normalizeEdge(r: RawEdge): Edge {
     polarity: (r.polarity as Polarity) ?? "+",
     delay: { type: delayType, magnitude: delayMag },
     strength: r.strength ?? 1,
+    ...(range ? { range } : {}),
   };
 }
 

@@ -3,7 +3,9 @@ import type { Edge, Graph, Node } from "@/model/types";
 import {
   DEFAULT_ENGINE_OPTIONS,
   computeSlots,
+  degreesOfFreedom,
   equilibrium,
+  headroom,
   impulse,
   initialState,
   run,
@@ -317,5 +319,183 @@ describe("sensitivity", () => {
 describe("default options", () => {
   it("ships with rk4 as the default integrator", () => {
     expect(DEFAULT_ENGINE_OPTIONS.integrator).toBe("rk4");
+  });
+});
+
+// --- Phase 2: collars made physical ----------------------------------------
+
+function collaredStock(id: string, value: number, lower?: number, upper?: number): Node {
+  const n: Node = { id, label: id, type: "stock", tioe_class: "none", initial_value: value, unit: "u" };
+  if (lower !== undefined || upper !== undefined) {
+    n.collar = {};
+    if (lower !== undefined) n.collar.lower = lower;
+    if (upper !== undefined) n.collar.upper = upper;
+  }
+  return n;
+}
+
+describe("collar enforcement", () => {
+  it("clamps a stock to its upper collar when inflow would exceed it", () => {
+    // src(exogenous=100) -> sink(stock, initial=0, upper=50)
+    // Without a collar, sink would grow past 50; the collar must stop it.
+    const g: Graph = {
+      nodes: [flow("src", 100), collaredStock("sink", 0, undefined, 50)],
+      edges: [edge("e1", "src", "sink", { strength: 1 })],
+      loops: [],
+    };
+    const o = opts({ dt: 0.1 });
+    let s = initialState(g, o);
+    for (let i = 0; i < 100; i++) s = step(g, s, o);
+    expect(s.values.sink).toBeLessThanOrEqual(50);
+    expect(s.pinned.sink).toBe("upper");
+  });
+
+  it("clamps a stock to its lower collar when outflow would go below it", () => {
+    // stock(initial=10, lower=5) -> sink, no return. Stock drains but can't go below 5.
+    const g: Graph = {
+      nodes: [collaredStock("tank", 10, 5, undefined), stock("drain", 0)],
+      edges: [edge("e1", "tank", "drain", { strength: 1 })],
+      loops: [],
+    };
+    const o = opts({ dt: 0.1 });
+    let s = initialState(g, o);
+    for (let i = 0; i < 100; i++) s = step(g, s, o);
+    expect(s.values.tank).toBeGreaterThanOrEqual(5);
+    expect(s.pinned.tank).toBe("lower");
+  });
+
+  it("anti-windup: a stock at upper collar reverses immediately when inflow drops", () => {
+    // src feeds sink (upper=50); sink drains to a free stock. Drive sink to
+    // the collar, then cut src to 0. The stock must begin falling on the
+    // FIRST step after the cut — no phantom lag from accumulated excess
+    // (§2.3 anti-windup test).
+    const g: Graph = {
+      nodes: [flow("src", 100), collaredStock("sink", 0, undefined, 50), stock("drain", 0)],
+      edges: [
+        edge("e1", "src", "sink", { strength: 1 }),
+        edge("e2", "sink", "drain", { strength: 1 }),
+      ],
+      loops: [],
+    };
+    const o = opts({ dt: 0.1 });
+    let s = initialState(g, o);
+    // Drive to the collar.
+    for (let i = 0; i < 200; i++) s = step(g, s, o);
+    expect(s.values.sink).toBe(50);
+    expect(s.pinned.sink).toBe("upper");
+    // Cut the source to 0.
+    s = setValue(s, "src", 0);
+    const before = s.values.sink;
+    s = step(g, s, o);
+    // Must fall on the very first step after reversal (outflow continues,
+    // inflow is zero — anti-windup means no accumulated excess holds it up).
+    expect(s.values.sink).toBeLessThan(before);
+    expect(s.pinned.sink).not.toBe("upper");
+  });
+
+  it("backpressure: rejected material stays in the delay queue when target is pinned", () => {
+    // src(exogenous=100) -> [delay 1] -> sink(upper=50, delayed)
+    // The queue should grow deeper than its nominal slot count as material
+    // backs up against the pinned target.
+    const g: Graph = {
+      nodes: [flow("src", 100), collaredStock("sink", 0, undefined, 50)],
+      edges: [edge("e1", "src", "sink", { magnitude: 1, strength: 1 })],
+      loops: [],
+    };
+    const o = opts({ dt: 0.25 });
+    let s = initialState(g, o);
+    // Run long enough for the stock to hit the collar and queues to back up.
+    for (let i = 0; i < 200; i++) s = step(g, s, o);
+    expect(s.values.sink).toBeLessThanOrEqual(50);
+    expect(s.pinned.sink).toBe("upper");
+    // Queue depth exceeds nominal slots (magnitude/dt = 1/0.25 = 4).
+    expect(s.delayQueues.e1.length).toBeGreaterThan(4);
+  });
+
+  it("conservation holds on a closed loop with collars", () => {
+    // Two stocks exchanging mass through delayed edges, one with an upper collar.
+    // Total mass (stocks + queues) must be conserved even when backpressure
+    // pushes material back into the queues.
+    const g: Graph = {
+      nodes: [collaredStock("a", 100, 0, 120), collaredStock("b", 0, 0)],
+      edges: [
+        edge("e1", "a", "b", { magnitude: 2, strength: 1 }),
+        edge("e2", "b", "a", { magnitude: 2, strength: 1 }),
+      ],
+      loops: [],
+    };
+    const o = opts({ dt: 0.01 });
+    const s0 = initialState(g, o);
+    const m0 = totalMass(g, s0);
+    for (const s of run(g, s0, o, 2000)) {
+      expect(Math.abs(totalMass(g, s) - m0)).toBeLessThan(1e-6);
+    }
+  });
+
+  it("collar-free fixtures produce trajectories identical to Phase 1 (no collar = no change)", () => {
+    // The same closed system without collars must behave exactly as before.
+    const gNoCollar: Graph = {
+      nodes: [stock("a", 100), stock("b", 0)],
+      edges: [
+        edge("e1", "a", "b", { magnitude: 2, strength: 1 }),
+        edge("e2", "b", "a", { magnitude: 2, strength: 1 }),
+      ],
+      loops: [],
+    };
+    const gCollar: Graph = {
+      nodes: [collaredStock("a", 100, -1e9, 1e9), collaredStock("b", 0, -1e9, 1e9)],
+      edges: gNoCollar.edges,
+      loops: [],
+    };
+    const o = opts({ dt: 0.01 });
+    const t1 = run(gNoCollar, initialState(gNoCollar, o), o, 100);
+    const t2 = run(gCollar, initialState(gCollar, o), o, 100);
+    for (let i = 0; i < t1.length; i++) {
+      expect(t2[i].values.a).toBeCloseTo(t1[i].values.a, 9);
+      expect(t2[i].values.b).toBeCloseTo(t1[i].values.b, 9);
+    }
+  });
+});
+
+describe("degrees of freedom", () => {
+  it("counts all nodes as free when none are pinned", () => {
+    const g: Graph = {
+      nodes: [stock("a", 100), stock("b", 0)],
+      edges: [],
+      loops: [],
+    };
+    const s = initialState(g, opts());
+    expect(degreesOfFreedom(g, s)).toBe(2);
+  });
+
+  it("decrements when a node is pinned at its upper collar", () => {
+    const g: Graph = {
+      nodes: [flow("src", 100), collaredStock("sink", 0, undefined, 50), stock("free", 0)],
+      edges: [edge("e1", "src", "sink", { strength: 1 })],
+      loops: [],
+    };
+    const o = opts({ dt: 0.1 });
+    let s = initialState(g, o);
+    expect(degreesOfFreedom(g, s)).toBe(3);
+    for (let i = 0; i < 100; i++) s = step(g, s, o);
+    expect(s.pinned.sink).toBe("upper");
+    expect(degreesOfFreedom(g, s)).toBe(2);
+  });
+});
+
+describe("headroom", () => {
+  it("returns the fraction of collar span remaining above the current value", () => {
+    const n = collaredStock("a", 50, 0, 100);
+    expect(headroom(n, 50)).toBeCloseTo(0.5, 6);
+    expect(headroom(n, 0)).toBeCloseTo(1, 6);
+    expect(headroom(n, 100)).toBeCloseTo(0, 6);
+  });
+
+  it("returns null for unbounded nodes", () => {
+    expect(headroom(stock("a"), 50)).toBeNull();
+  });
+
+  it("returns null for a node with only one bound", () => {
+    expect(headroom(collaredStock("a", 50, 0, undefined), 50)).toBeNull();
   });
 });

@@ -1,5 +1,8 @@
 import type {
+  Collar,
+  CollarApproach,
   Edge,
+  EdgeRange,
   Graph,
   Loop,
   LoopSign,
@@ -38,8 +41,11 @@ export type ValidationCode =
   | "loop_unknown_edge"
   | "loop_sign_mismatch"
   | "loop_not_closed"
-  | "collar_out_of_bounds"
-  | "collar_lower_above_upper";
+  | "collar_ambiguous_units"
+  | "collar_lower_above_upper"
+  | "collar_initial_out_of_range"
+  | "collar_invalid_approach"
+  | "range_invalid";
 
 export interface ValidationIssue {
   code: ValidationCode;
@@ -52,6 +58,7 @@ const NODE_TYPES = new Set<NodeType>(["stock", "flow", "auxiliary"]);
 const TIOE_CLASSES = new Set<TioeClass>(["T", "I", "OE", "none"]);
 const POLARITIES = new Set<Polarity>(["+", "-"]);
 const DELAY_TYPES = new Set(["none", "material", "information", "perception"]);
+const COLLAR_APPROACHES = new Set<CollarApproach>(["hard", "soft"]);
 
 export function validate(graph: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -138,40 +145,78 @@ function validateNode(node: unknown, seen: Set<string>): ValidationIssue[] {
       });
     }
   }
-  const lo = n.lower_collar;
-  const hi = n.upper_collar;
-  if (lo !== undefined) {
-    if (typeof lo !== "number" || Number.isNaN(lo) || lo < 0 || lo > 1) {
-      issues.push({
-        code: "collar_out_of_bounds",
-        message: `node "${n.id}" lower_collar must be a number in [0,1]`,
-        ref: n.id,
-      });
-    }
-  }
-  if (hi !== undefined) {
-    if (typeof hi !== "number" || Number.isNaN(hi) || hi < 0 || hi > 1) {
-      issues.push({
-        code: "collar_out_of_bounds",
-        message: `node "${n.id}" upper_collar must be a number in [0,1]`,
-        ref: n.id,
-      });
-    }
-  }
-  if (
-    lo !== undefined &&
-    hi !== undefined &&
-    typeof lo === "number" &&
-    typeof hi === "number" &&
-    !Number.isNaN(lo) &&
-    !Number.isNaN(hi) &&
-    lo > hi
-  ) {
+  // Detect legacy flat collar fields (pre-Phase-2 normalized [0,1] bounds).
+  // The spec requires these to be restated in the new `collar:` block with
+  // physical units — they are NOT silently reinterpreted.
+  const raw = node as Record<string, unknown>;
+  if (raw.lower_collar !== undefined || raw.upper_collar !== undefined) {
     issues.push({
-      code: "collar_lower_above_upper",
-      message: `node "${n.id}" lower_collar (${lo}) must be <= upper_collar (${hi})`,
+      code: "collar_ambiguous_units",
+      message: `node "${n.id}" uses legacy flat lower_collar/upper_collar fields. Restate as: collar: { lower: <physical>, upper: <physical> } in the same units as initial_value.`,
       ref: n.id,
     });
+  }
+  // Validate the new collar: block (physical units).
+  if (n.collar !== undefined) {
+    const c = n.collar as Partial<Collar>;
+    const lo = c.lower;
+    const hi = c.upper;
+    if (lo !== undefined && (typeof lo !== "number" || Number.isNaN(lo))) {
+      issues.push({
+        code: "collar_ambiguous_units",
+        message: `node "${n.id}" collar.lower must be a number`,
+        ref: n.id,
+      });
+    }
+    if (hi !== undefined && (typeof hi !== "number" || Number.isNaN(hi))) {
+      issues.push({
+        code: "collar_ambiguous_units",
+        message: `node "${n.id}" collar.upper must be a number`,
+        ref: n.id,
+      });
+    }
+    if (
+      lo !== undefined &&
+      hi !== undefined &&
+      typeof lo === "number" &&
+      typeof hi === "number" &&
+      !Number.isNaN(lo) &&
+      !Number.isNaN(hi) &&
+      lo >= hi
+    ) {
+      issues.push({
+        code: "collar_lower_above_upper",
+        message: `node "${n.id}" collar.lower (${lo}) must be < collar.upper (${hi})`,
+        ref: n.id,
+      });
+    }
+    // initial_value must lie within [lower, upper] when bounds are present.
+    if (
+      typeof n.initial_value === "number" &&
+      !Number.isNaN(n.initial_value)
+    ) {
+      if (lo !== undefined && typeof lo === "number" && n.initial_value < lo) {
+        issues.push({
+          code: "collar_initial_out_of_range",
+          message: `node "${n.id}" initial_value (${n.initial_value}) is below collar.lower (${lo})`,
+          ref: n.id,
+        });
+      }
+      if (hi !== undefined && typeof hi === "number" && n.initial_value > hi) {
+        issues.push({
+          code: "collar_initial_out_of_range",
+          message: `node "${n.id}" initial_value (${n.initial_value}) is above collar.upper (${hi})`,
+          ref: n.id,
+        });
+      }
+    }
+    if (c.approach !== undefined && !COLLAR_APPROACHES.has(c.approach)) {
+      issues.push({
+        code: "collar_invalid_approach",
+        message: `node "${n.id}" collar.approach must be "hard" or "soft"`,
+        ref: n.id,
+      });
+    }
   }
   return issues;
 }
@@ -270,6 +315,30 @@ function validateEdge(
       message: `edge "${e.id}" strength must be >= 0`,
       ref: e.id,
     });
+  }
+  // Validate authored uncertainty ranges (Phase 8 sampler; not engine-enforced).
+  if (e.range !== undefined) {
+    const r = e.range as Partial<EdgeRange>;
+    if (r.strength !== undefined) {
+      const [min, max] = r.strength;
+      if (typeof min !== "number" || typeof max !== "number" || min > max) {
+        issues.push({
+          code: "range_invalid",
+          message: `edge "${e.id}" range.strength must be [min, max] with min <= max`,
+          ref: e.id,
+        });
+      }
+    }
+    if (r.delay_magnitude !== undefined) {
+      const [min, max] = r.delay_magnitude;
+      if (typeof min !== "number" || typeof max !== "number" || min > max || min < 0) {
+        issues.push({
+          code: "range_invalid",
+          message: `edge "${e.id}" range.delay_magnitude must be [min, max] with 0 <= min <= max`,
+          ref: e.id,
+        });
+      }
+    }
   }
   return issues;
 }

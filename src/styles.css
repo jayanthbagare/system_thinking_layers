@@ -888,3 +888,29 @@ dialog.edit-modal::backdrop {
   color: #fff;
   border-color: var(--c-delay);
 }
+
+/* --- DoF counter (play bar, visible in every layer) -------------------- */
+.play-dof {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  color: #555;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #eee;
+  white-space: nowrap;
+}
+
+/* --- Pinned-node ring styles (Phase 2: collar enforcement) ------------- */
+/* A node pinned at its upper collar gets a solid ring; at the lower collar,
+ * a dashed ring. This is not colour alone — it communicates "this node has
+ * hit a wall" distinctly from heat coloring. */
+.node-circle.is-pinned-upper {
+  stroke: #c62828;
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+.node-circle.is-pinned-lower {
+  stroke: #1976d2;
+  stroke-width: 3;
+  stroke-dasharray: 4 3;
+}

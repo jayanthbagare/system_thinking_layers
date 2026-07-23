@@ -44,10 +44,33 @@ A working fixture lives at
 | `tioe_class` | no | `T` \| `I` \| `OE` \| `none` | `none` |
 | `initial_value` | no | number | `0` |
 | `unit` | no | string | `""` |
-| `lower_collar` | no | number (0–1) | omitted (no lower clamp) |
-| `upper_collar` | no | number (0–1) | omitted (no upper clamp) |
+| `collar` | no | object (below) | omitted (unbounded) |
 | `agent_binding` | no | `{ rule_id: string }` | omitted |
 | `pin` | no | `{ x: number, y: number }` | omitted (auto-layout) |
+
+> **Migration note:** the legacy flat fields `lower_collar` / `upper_collar`
+> (normalized [0,1]) are **rejected** at parse time with `collar_ambiguous_units`.
+> Restate them in the `collar:` block with physical units matching `initial_value`.
+
+### Collar object
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `lower` | number | omitted (no lower clamp) | Physical lower bound. Engine clamps value to >= lower. |
+| `upper` | number | omitted (no upper clamp) | Physical upper bound. Engine clamps value to <= upper. |
+| `approach` | `hard` \| `soft` | `hard` | `hard` clips at the boundary; `soft` ramps transfer to zero in the top 10% of the span (Phase 7). |
+
+Validation: `lower < upper`; `lower <= initial_value <= upper`; each bound
+optional independently. A node with neither bound is unbounded. The engine
+enforces collars with anti-windup (excess does not accumulate) and
+reject-and-backpressure (excess returns to delay queues).
+
+```yaml
+- id: production_capacity
+  initial_value: 100
+  unit: units/week
+  collar: { lower: 0, upper: 120 }
+```
 
 ## Edge fields
 
@@ -59,6 +82,7 @@ A working fixture lives at
 | `polarity` | no | `+` \| `-` | `+` |
 | `delay` | no | object (below) | `{ type: none, magnitude: 0 }` |
 | `strength` | no | number | `1` |
+| `range` | no | object (below) | omitted |
 
 ### Delay object
 
@@ -67,14 +91,24 @@ A working fixture lives at
 | `type` | `none` \| `material` \| `information` \| `perception` | |
 | `magnitude` | number (>= 0) | model time units |
 
-A shorthand is also accepted on the edge itself for terseness:
+### Range object (Phase 8)
+
+Authored uncertainty on an edge's static properties. NOT enforced by the
+engine — consumed only by the Phase 8 Monte Carlo sampler. A `range` says "I
+don't know this number precisely," distinct from a `collar` which says "the
+system cannot go there."
+
+| Field | Type | Meaning |
+|---|---|---|
+| `strength` | `[min, max]` | Range for the edge's `strength` |
+| `delay_magnitude` | `[min, max]` | Range for `delay.magnitude` |
 
 ```yaml
-- id: e1
-  source: a
-  target: b
-  delay_type: material
-  delay_magnitude: 4
+- id: e2
+  source: retailer_backlog
+  target: retailer_orders
+  strength: 1.3
+  range: { strength: [1.1, 1.6], delay_magnitude: [1, 4] }
 ```
 
 ## JSON

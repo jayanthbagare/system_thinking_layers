@@ -7,8 +7,11 @@
 #
 # Loops are NOT authored here — they are computed from the edges (src/graph).
 #
-# Each node carries an upper/lower collar: normalized [0,1] bounds that clamp
-# the node's live loopy-animation value so it cannot drift beyond a sane range.
+# Collars are physical bounds in the node's own units, enforced inside the
+# simulation engine. Only production_capacity is capped (its upper collar is
+# the system's real constraint). Backlogs have a lower bound of 0 (can't be
+# negative) but NO upper collar — a backlog has no ceiling in this model, and
+# inventing one was an artefact of the old normalized framing.
 
 nodes:
   - id: customer_demand
@@ -17,8 +20,6 @@ nodes:
     tioe_class: T
     initial_value: 100
     unit: units/week
-    lower_collar: 0.2
-    upper_collar: 0.9
 
   - id: retailer_backlog
     label: Retailer Backlog
@@ -26,8 +27,7 @@ nodes:
     tioe_class: I
     initial_value: 0
     unit: units
-    lower_collar: 0
-    upper_collar: 0.95
+    collar: { lower: 0 }
 
   - id: retailer_orders
     label: Retailer Orders
@@ -35,8 +35,6 @@ nodes:
     tioe_class: T
     initial_value: 100
     unit: units/week
-    lower_collar: 0.2
-    upper_collar: 0.9
 
   - id: wholesaler_backlog
     label: Wholesaler Backlog
@@ -44,8 +42,7 @@ nodes:
     tioe_class: I
     initial_value: 0
     unit: units
-    lower_collar: 0
-    upper_collar: 0.95
+    collar: { lower: 0 }
 
   - id: wholesaler_orders
     label: Wholesaler Orders
@@ -53,8 +50,6 @@ nodes:
     tioe_class: T
     initial_value: 100
     unit: units/week
-    lower_collar: 0.2
-    upper_collar: 0.9
 
   - id: production_capacity
     label: Production Capacity
@@ -62,8 +57,7 @@ nodes:
     tioe_class: OE
     initial_value: 100
     unit: units/week
-    lower_collar: 0.1
-    upper_collar: 1
+    collar: { lower: 0, upper: 120 }
 
 edges:
   - id: e1

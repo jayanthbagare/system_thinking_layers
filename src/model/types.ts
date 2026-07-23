@@ -11,10 +11,41 @@ export type NodeType = "stock" | "flow" | "auxiliary";
 /** Layer 3 tag. Throughput / Investment-Inventory / Operating Expense / none. */
 export type TioeClass = "T" | "I" | "OE" | "none";
 
+/** How a collar bound is enforced at the boundary. */
+export type CollarApproach = "hard" | "soft";
+
+/**
+ * A physical bound on a node's value, in the same units as `initial_value`.
+ * A collar says "the system cannot go there" — it is enforced inside the
+ * simulation engine, not as a display clamp. Each bound is optional
+ * independently: a node with only `upper` has no lower limit, and vice versa.
+ */
+export interface Collar {
+  /** Physical lower bound. The engine clamps the value to >= lower. */
+  lower?: number;
+  /** Physical upper bound. The engine clamps the value to <= upper. */
+  upper?: number;
+  /** `hard` (default) clips at the boundary; `soft` ramps transfer to zero in
+   * the top 10% of the span (Phase 7). Phase 2 enforces `hard` only. */
+  approach?: CollarApproach;
+}
+
 /** Reference to an ABM rule; present only if the node has an ABM companion. */
 export interface AgentRuleRef {
   /** Id of the rule definition (see src/abm in Phase 5). */
   rule_id: string;
+}
+
+/**
+ * Authored uncertainty on an edge's static properties (Phase 8 sampler). NOT
+ * enforced by the engine — it declares "I don't know this number precisely,"
+ * distinct from a collar which declares "the system cannot go there."
+ */
+export interface EdgeRange {
+  /** [min, max] range for the edge's `strength`. */
+  strength?: [number, number];
+  /** [min, max] range for the edge's `delay.magnitude`. */
+  delay_magnitude?: [number, number];
 }
 
 export interface Node {
@@ -25,17 +56,12 @@ export interface Node {
   initial_value: number;
   unit: string;
   /**
-   * Normalized [0,1] lower bound (collar) for this node's live loopy value.
-   * The loopy animation clamps the node's value to >= lower_collar. Omit (or 0)
-   * for no lower clamp. Authored in the YAML alongside upper_collar.
+   * Physical collar on this node's value, in the same units as
+   * `initial_value`. Enforced inside the simulation engine (Phase 2): the
+   * value is clamped to [lower, upper] with anti-windup and backpressure.
+   * Omit for an unbounded node.
    */
-  lower_collar?: number;
-  /**
-   * Normalized [0,1] upper bound (collar) for this node's live loopy value.
-   * The loopy animation clamps the node's value to <= upper_collar. Omit (or 1)
-   * for no upper clamp. Must be >= lower_collar.
-   */
-  upper_collar?: number;
+  collar?: Collar;
   /** Present only if this node has an ABM companion. Omit when absent. */
   agent_binding?: AgentRuleRef;
   /**
@@ -68,6 +94,8 @@ export interface Edge {
   delay: EdgeDelay;
   /** Relative influence weight, for simulation. */
   strength: number;
+  /** Authored uncertainty on static properties (Phase 8). Not engine-enforced. */
+  range?: EdgeRange;
 }
 
 export type LoopSign = "reinforcing" | "balancing";

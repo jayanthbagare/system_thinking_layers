@@ -11,8 +11,7 @@ function n(partial: Partial<Node>): Node {
     initial_value: partial.initial_value ?? 0,
     unit: partial.unit ?? "u",
     ...("pin" in partial ? { pin: partial.pin } : {}),
-    ...("lower_collar" in partial ? { lower_collar: partial.lower_collar } : {}),
-    ...("upper_collar" in partial ? { upper_collar: partial.upper_collar } : {}),
+    ...("collar" in partial ? { collar: partial.collar } : {}),
     ...("agent_binding" in partial ? { agent_binding: partial.agent_binding } : {}),
   };
 }
@@ -104,29 +103,74 @@ describe("validate", () => {
     expect(validate(g).length).toBeGreaterThan(1);
   });
 
-  it("accepts optional collars within [0,1]", () => {
-    const g = graph([n({ id: "a", lower_collar: 0.2, upper_collar: 0.9 })], []);
+  it("accepts a physical collar block with lower and upper in the node's own units", () => {
+    const g = graph([n({ id: "a", initial_value: 50, collar: { lower: 0, upper: 120 } })], []);
     expect(validate(g)).toEqual([]);
   });
 
-  it("accepts collars at the 0 and 1 extremes", () => {
-    const g = graph([n({ id: "a", lower_collar: 0, upper_collar: 1 })], []);
+  it("accepts a collar with only a lower bound (unbounded above)", () => {
+    const g = graph([n({ id: "a", initial_value: 50, collar: { lower: 0 } })], []);
     expect(validate(g)).toEqual([]);
   });
 
-  it("rejects collars outside [0,1]", () => {
-    const g = graph([n({ id: "a", lower_collar: -0.1, upper_collar: 1.2 })], []);
-    const codes = validate(g).map((i) => i.code);
-    expect(codes).toContain("collar_out_of_bounds");
+  it("accepts a collar with only an upper bound (unbounded below)", () => {
+    const g = graph([n({ id: "a", initial_value: 50, collar: { upper: 120 } })], []);
+    expect(validate(g)).toEqual([]);
   });
 
-  it("rejects lower_collar above upper_collar", () => {
-    const g = graph([n({ id: "a", lower_collar: 0.8, upper_collar: 0.2 })], []);
+  it("rejects collar.lower >= collar.upper", () => {
+    const g = graph([n({ id: "a", initial_value: 50, collar: { lower: 80, upper: 80 } })], []);
     expect(validate(g).some((i) => i.code === "collar_lower_above_upper")).toBe(true);
   });
 
-  it("accepts a single collar bound without the other", () => {
-    const g = graph([n({ id: "a", upper_collar: 0.7 })], []);
-    expect(validate(g)).toEqual([]);
+  it("rejects initial_value above collar.upper", () => {
+    const g = graph([n({ id: "a", initial_value: 150, collar: { lower: 0, upper: 120 } })], []);
+    expect(validate(g).some((i) => i.code === "collar_initial_out_of_range")).toBe(true);
+  });
+
+  it("rejects initial_value below collar.lower", () => {
+    const g = graph([n({ id: "a", initial_value: -10, collar: { lower: 0, upper: 120 } })], []);
+    expect(validate(g).some((i) => i.code === "collar_initial_out_of_range")).toBe(true);
+  });
+
+  it("fires collar_ambiguous_units for legacy flat lower_collar/upper_collar fields", () => {
+    const raw = {
+      id: "a",
+      label: "a",
+      type: "stock",
+      tioe_class: "none",
+      initial_value: 50,
+      unit: "u",
+      lower_collar: 0.2,
+      upper_collar: 0.9,
+    };
+    const issues = validate({ nodes: [raw], edges: [], loops: [] });
+    expect(issues.some((i) => i.code === "collar_ambiguous_units" && i.ref === "a")).toBe(true);
+  });
+
+  it("fires collar_ambiguous_units even when only one legacy field is present", () => {
+    const raw = {
+      id: "a",
+      label: "a",
+      type: "stock",
+      tioe_class: "none",
+      initial_value: 50,
+      unit: "u",
+      upper_collar: 0.9,
+    };
+    const issues = validate({ nodes: [raw], edges: [], loops: [] });
+    expect(issues.some((i) => i.code === "collar_ambiguous_units")).toBe(true);
+  });
+
+  it("accepts a collar with approach: hard or soft", () => {
+    const g1 = graph([n({ id: "a", initial_value: 50, collar: { lower: 0, upper: 100, approach: "hard" } })], []);
+    expect(validate(g1)).toEqual([]);
+    const g2 = graph([n({ id: "a", initial_value: 50, collar: { lower: 0, upper: 100, approach: "soft" } })], []);
+    expect(validate(g2)).toEqual([]);
+  });
+
+  it("rejects an invalid collar approach", () => {
+    const g = graph([n({ id: "a", initial_value: 50, collar: { lower: 0, upper: 100, approach: "fast" as "hard" } })], []);
+    expect(validate(g).some((i) => i.code === "collar_invalid_approach")).toBe(true);
   });
 });

@@ -29,15 +29,32 @@ type Weights = typeof DEFAULT_WEIGHTS;
 
 /** Apply a NodeEditPatch to an existing node, preserving unedited optional fields. */
 function applyPatch(node: Node, patch: NodeEditPatch): Node {
-  const { pin, clearPin, agent_binding: _ab, clearAgentBinding, ...rest } = patch;
+  const { pin, clearPin, agent_binding: _ab, clearAgentBinding, collar, clearCollar, ...rest } = patch;
   void _ab;
   const next: Node = { ...node, ...rest };
+  if (clearCollar) {
+    const { collar: _c, ...noCollar } = next;
+    void _c;
+    return finishPatch(noCollar, pin, clearPin, clearAgentBinding);
+  }
+  if (collar) next.collar = collar;
+  return finishPatch(next, pin, clearPin, clearAgentBinding);
+}
+
+function finishPatch(
+  node: Node,
+  pin: { x: number; y: number } | undefined,
+  clearPin: boolean | undefined,
+  clearAgentBinding: boolean | undefined,
+): Node {
+  let next = node;
   if (clearPin) {
     const { pin: _drop, ...noPin } = next;
     void _drop;
-    return clearAgentBinding ? stripAgentBinding(noPin) : noPin;
+    next = noPin;
+  } else if (pin) {
+    next.pin = pin;
   }
-  if (pin) next.pin = pin;
   return clearAgentBinding ? stripAgentBinding(next) : next;
 }
 
@@ -110,6 +127,9 @@ function main(): void {
       l2.setWeights(weights);
       l3.setWeights(weights);
       downloadGraphYaml(graph);
+    },
+    onStep: (dof: number, total: number) => {
+      dofLabel.textContent = `DoF: ${dof} of ${total}`;
     },
   });
   renderer.render(graph);
@@ -233,7 +253,10 @@ function main(): void {
   const hint = document.createElement("span");
   hint.className = "play-hint";
   hint.textContent = "Hover a node, click ▲/▼ to nudge it";
-  playBar.append(playBtn, resetBtn, hint);
+  const dofLabel = document.createElement("span");
+  dofLabel.className = "play-dof";
+  dofLabel.textContent = `DoF: ${graph.nodes.length} of ${graph.nodes.length}`;
+  playBar.append(playBtn, resetBtn, dofLabel, hint);
   root.append(playBar);
 
   // --- Session save/load (Phase 6) --------------------------------------

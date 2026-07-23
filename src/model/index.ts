@@ -1,8 +1,11 @@
 export type {
   AbmVerdict,
   AgentRuleRef,
+  Collar,
+  CollarApproach,
   DelayType,
   Edge,
+  EdgeRange,
   EdgeDelay,
   Graph,
   Loop,

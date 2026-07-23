@@ -1,7 +1,9 @@
 export {
   DEFAULT_ENGINE_OPTIONS,
   createEngine,
+  degreesOfFreedom,
   equilibrium,
+  headroom,
   impulse,
   initialState,
   run,

@@ -13,7 +13,7 @@
  * mutates `Graph` itself.
  */
 
-import type { Graph, Node, NodeType, TioeClass } from "@/model/types";
+import type { Collar, Graph, Node, NodeType, TioeClass } from "@/model/types";
 import { validate } from "@/model/validate";
 
 /** A node's editable fields, as collected from the modal form. */
@@ -23,8 +23,9 @@ export interface NodeEditPatch {
   tioe_class: TioeClass;
   initial_value: number;
   unit: string;
-  lower_collar?: number;
-  upper_collar?: number;
+  collar?: Collar;
+  /** When true, the existing collar (if any) is removed. */
+  clearCollar?: boolean;
   pin?: { x: number; y: number };
   /** When true, the existing pin (if any) is removed. */
   clearPin?: boolean;
@@ -64,14 +65,14 @@ export function openEditModal(
   form.append(fieldRow("Unit", textInput("unit", node.unit)));
   form.append(
     fieldRow(
-      "Lower collar [0,1]",
-      numberInput("lower_collar", node.lower_collar ?? 0, { step: "0.05", min: "0", max: "1" }),
+      "Collar lower (physical)",
+      numberInput("collar_lower", node.collar?.lower ?? 0, { step: "any" }),
     ),
   );
   form.append(
     fieldRow(
-      "Upper collar [0,1]",
-      numberInput("upper_collar", node.upper_collar ?? 1, { step: "0.05", min: "0", max: "1" }),
+      "Collar upper (physical)",
+      numberInput("collar_upper", node.collar?.upper ?? 0, { step: "any" }),
     ),
   );
   form.append(
@@ -237,8 +238,8 @@ function agentBindingRow(ruleId: string): HTMLElement {
 
 function collectPatch(form: HTMLFormElement, original: Node): NodeEditPatch {
   const fd = new FormData(form);
-  const lowerRaw = String(fd.get("lower_collar") ?? "");
-  const upperRaw = String(fd.get("upper_collar") ?? "");
+  const collarLowerRaw = String(fd.get("collar_lower") ?? "");
+  const collarUpperRaw = String(fd.get("collar_upper") ?? "");
   const pinClear = fd.get("pin_clear") === "on";
   const pinX = Number(fd.get("pin_x"));
   const pinY = Number(fd.get("pin_y"));
@@ -252,13 +253,15 @@ function collectPatch(form: HTMLFormElement, original: Node): NodeEditPatch {
     initial_value: Number(fd.get("initial_value")),
     unit: String(fd.get("unit") ?? "").trim(),
   };
-  if (lowerRaw !== "") {
-    const lo = Number(lowerRaw);
-    if (!Number.isNaN(lo)) patch.lower_collar = lo;
-  }
-  if (upperRaw !== "") {
-    const hi = Number(upperRaw);
-    if (!Number.isNaN(hi)) patch.upper_collar = hi;
+  const lo = collarLowerRaw !== "" ? Number(collarLowerRaw) : NaN;
+  const hi = collarUpperRaw !== "" ? Number(collarUpperRaw) : NaN;
+  if (!Number.isNaN(lo) || !Number.isNaN(hi)) {
+    const collar: Collar = {};
+    if (!Number.isNaN(lo)) collar.lower = lo;
+    if (!Number.isNaN(hi)) collar.upper = hi;
+    patch.collar = collar;
+  } else {
+    patch.clearCollar = true;
   }
   if (!pinClear && !Number.isNaN(pinX) && !Number.isNaN(pinY)) {
     patch.pin = { x: pinX, y: pinY };
@@ -285,8 +288,7 @@ function validatePatch(node: Node, patch: NodeEditPatch, graph: Graph): string |
     tioe_class: patch.tioe_class,
     initial_value: patch.initial_value,
     unit: patch.unit,
-    ...(patch.lower_collar !== undefined ? { lower_collar: patch.lower_collar } : {}),
-    ...(patch.upper_collar !== undefined ? { upper_collar: patch.upper_collar } : {}),
+    ...(patch.collar ? { collar: patch.collar } : {}),
     ...(patch.pin ? { pin: patch.pin } : {}),
     ...(patch.agent_binding ? { agent_binding: patch.agent_binding } : {}),
     ...(node.abm_verdict ? { abm_verdict: node.abm_verdict } : {}),

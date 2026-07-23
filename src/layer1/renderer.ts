@@ -41,7 +41,7 @@ import {
   valueRadiusFraction,
   type Point,
 } from "./layout";
-import { createEngine, equilibrium, type Engine, type EngineOptions } from "@/sim";
+import { createEngine, degreesOfFreedom, equilibrium, type Engine, type EngineOptions } from "@/sim";
 import { sparkline, type SparklineSeries } from "@/layer3";
 import { openEditModal, type NodeEditPatch } from "./editModal";
 
@@ -113,6 +113,11 @@ export interface RendererOptions {
    * populate the form and re-renders after the host has applied the patch.
    */
   onEditNode?: (nodeId: string, patch: NodeEditPatch) => void;
+  /**
+   * Called after each animation step, with the current DoF count. Used by the
+   * play bar to surface "Degrees of freedom: N of M" — visible in every layer.
+   */
+  onStep?: (dof: number, total: number) => void;
 }
 
 export class Layer1Renderer {
@@ -278,7 +283,14 @@ export class Layer1Renderer {
       this.engine.step();
       this.drawSignals();
       this.styleNodeValues();
+      this.styleNodesForHeat();
       this.stepMonitor();
+      if (this.opts.onStep) {
+        this.opts.onStep(
+          degreesOfFreedom(this.graph, this.engine.state),
+          this.graph.nodes.length,
+        );
+      }
       this.rafId = requestAnimationFrame(tick);
     };
     this.rafId = requestAnimationFrame(tick);
@@ -768,7 +780,7 @@ export class Layer1Renderer {
     this.styleNodeValues();
   }
 
-  /** Apply (or clear) the Layer 2 heat overlay styling on node circles. */
+  /** Apply (or clear) the Layer 2 heat overlay + pinned-collar rings. */
   private styleNodesForHeat(): void {
     const sel = this.nodeLayer.selectAll<SVGGElement, SimNode>("g.node");
     sel.each((d, i, groups) => {
@@ -783,6 +795,11 @@ export class Layer1Renderer {
         // Restore Layer 1 defaults (CSS-driven fill + base radius).
         circle.attr("fill", null).attr("r", NODE_RADIUS);
       }
+      // Collar-pinned ring: solid for upper, dashed for lower (§2.6).
+      const pin = this.engine?.state.pinned[d.id] ?? null;
+      circle
+        .classed("is-pinned-upper", pin === "upper")
+        .classed("is-pinned-lower", pin === "lower");
     });
   }
 

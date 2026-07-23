@@ -19,31 +19,50 @@ describe("parseGraph", () => {
     expect(graph!.loops).toEqual([]); // computed in Phase 2, never authored
   });
 
-  it("parses node collars authored in the fixture", () => {
+  it("parses node collars authored in the fixture (physical units)", () => {
     const { graph, issues } = parseGraph(loadFixture("beer-distribution.yaml"));
     expect(issues).toEqual([]);
-    const demand = graph!.nodes.find((n) => n.id === "customer_demand")!;
-    expect(demand.lower_collar).toBe(0.2);
-    expect(demand.upper_collar).toBe(0.9);
     const capacity = graph!.nodes.find((n) => n.id === "production_capacity")!;
-    expect(capacity.lower_collar).toBe(0.1);
-    expect(capacity.upper_collar).toBe(1);
+    expect(capacity.collar).toBeDefined();
+    expect(capacity.collar!.lower).toBe(0);
+    expect(capacity.collar!.upper).toBe(120);
+    // Backlogs have lower: 0 but no upper (unbounded above).
+    const backlog = graph!.nodes.find((n) => n.id === "retailer_backlog")!;
+    expect(backlog.collar).toBeDefined();
+    expect(backlog.collar!.lower).toBe(0);
+    expect(backlog.collar!.upper).toBeUndefined();
+    // Uncollared nodes have no collar block.
+    const demand = graph!.nodes.find((n) => n.id === "customer_demand")!;
+    expect(demand.collar).toBeUndefined();
   });
 
   it("parses optional collars and omits them when absent", () => {
     const yaml = `
 nodes:
   - id: a
-    lower_collar: 0.1
+    initial_value: 50
+    collar: { lower: 0, upper: 100 }
   - id: b
 edges: []
 `;
     const { graph, issues } = parseGraph(yaml);
     expect(issues).toEqual([]);
-    expect(graph!.nodes[0].lower_collar).toBe(0.1);
-    expect(graph!.nodes[0].upper_collar).toBeUndefined();
-    expect(graph!.nodes[1].lower_collar).toBeUndefined();
-    expect(graph!.nodes[1].upper_collar).toBeUndefined();
+    expect(graph!.nodes[0].collar).toEqual({ lower: 0, upper: 100 });
+    expect(graph!.nodes[1].collar).toBeUndefined();
+  });
+
+  it("fires collar_ambiguous_units for legacy flat collar fields", () => {
+    const yaml = `
+nodes:
+  - id: a
+    initial_value: 50
+    lower_collar: 0.2
+    upper_collar: 0.9
+edges: []
+`;
+    const { graph, issues } = parseGraph(yaml);
+    expect(graph).toBeNull();
+    expect(issues.some((i) => i.code === "collar_ambiguous_units" && i.ref === "a")).toBe(true);
   });
 
   it("accepts JSON as well as YAML", () => {
@@ -145,8 +164,7 @@ describe("serializeGraphYaml", () => {
   it("emits collars and delay as readable inline YAML", () => {
     const original = parseGraphOrThrow(loadFixture("beer-distribution.yaml"));
     const yaml = serializeGraphYaml(original);
-    expect(yaml).toContain("lower_collar: 0.2");
-    expect(yaml).toContain("upper_collar: 0.9");
+    expect(yaml).toContain("collar: { lower: 0, upper: 120 }");
     expect(yaml).toContain("delay: { type: information, magnitude: 2 }");
     expect(yaml).toContain("strength: 1.3");
     // Loops are never serialized (computed, never authored).
@@ -160,7 +178,7 @@ nodes:
 edges: []
 `);
     const yaml = serializeGraphYaml(minimal);
-    expect(yaml).not.toContain("lower_collar");
+    expect(yaml).not.toContain("collar");
     expect(yaml).not.toContain("pin");
     expect(yaml).not.toContain("agent_binding");
   });

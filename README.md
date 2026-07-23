@@ -77,7 +77,7 @@ unfamiliar.
 | **Signal**               | A pulse that travels along an edge carrying a value change. When you nudge a node, a signal rides every outgoing arrow; when it lands, the target node's value shifts and a fresh signal rides onward. This is the live "running the network" animation — reinforcing loops amplify the pulse, balancing loops dampen it. |
 | **Nudge**                | A small push to a node's value via the ▲/▼ arrows that appear on hover. Up grows the value (positive direction); down shrinks it (negative direction). The signed change propagates to the next node and around the loop.                                                                              |
 | **Value circle**         | The filled circle inside each node. Its radius encodes the node's current value (bigger = higher); its color encodes the direction of drift (green = above rest, red = below rest). Updates live as pulses circulate.                                                                                  |
-| **Collar**               | An optional upper and/or lower bound on a node's value, authored in the YAML as `lower_collar` and `upper_collar`. Today these are normalised [0,1] fields that the live animation clamps; a planned migration (Phase 2) restates them in the node's own physical units and enforces them inside the simulation engine, so a collar becomes a real capacity limit that changes trajectories. Until then, collars affect only the live display. Omit both for no clamping. |
+| **Collar**               | A physical bound on a node's value, in the same units as `initial_value`. Authored as a `collar:` block with optional `lower` and `upper`. The simulation engine enforces it: the value is clamped at the boundary, with anti-windup (excess doesn't accumulate) and backpressure (excess stays in delay queues). A collar is a fact about the system — a real capacity limit that changes trajectories. Omit for an unbounded node. |
 | **Node monitor**         | A right-side panel (L1 only) that plots node values over time as sparklines. In small graphs (< 7 nodes) all nodes are shown; in larger graphs a dropdown picks one. Lets you watch oscillation and amplification unfold as the live animation runs. |
 | **Intervention**         | A hypothetical change you make to one node to see what would happen — "what if we doubled capacity here?"                                                                                                                                                                                              |
 | **Agent**                | An individual actor in the system — one warehouse, one customer, one machine. The ABM view simulates many agents individually and sees what emerges in aggregate.                                                                                                                                      |
@@ -132,7 +132,7 @@ section 5). You can start exploring immediately.
 | Command             | What it does                                                                                                                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run build`     | Creates a production build in the `dist/` folder. You can open `dist/index.html` directly in a browser, or deploy it to any static host. |
-| `npm test`          | Runs the test suite (178 automated tests). Not needed for normal use.                                                                    |
+| `npm test`          | Runs the test suite (195 automated tests). Not needed for normal use.                                                                    |
 | `npm run lint`      | Checks code quality. Only relevant if you are editing the source.                                                                        |
 | `npm run typecheck` | Checks TypeScript types. Only relevant if you are editing the source.                                                                    |
 
@@ -423,8 +423,8 @@ opens a modal dialog showing every editable field of that node:
 | **TIOE class**        | `T`, `I`, `OE`, or `none` — the Layer 3 financial category.                                                                |
 | **Initial value**     | The starting value for quantitative simulation.                                                                             |
 | **Unit**              | The unit of measurement (e.g., "units/week").                                                                              |
-| **Lower collar**      | The lower bound (in [0,1]) for the node's live loopy value. The animation clamps the value to stay at or above this.       |
-| **Upper collar**      | The upper bound (in [0,1]) for the node's live loopy value. The animation clamps the value to stay at or below this.       |
+| **Collar lower (physical)** | The lower bound for the node's value, in the node's own units. The engine clamps the value to stay at or above this.       |
+| **Collar upper (physical)** | The upper bound for the node's value, in the node's own units. The engine clamps the value to stay at or below this.       |
 | **Pin x / y**         | The node's fixed screen position. Check "auto-layout (clear pin)" to remove the pin and let the layout engine place it.   |
 | **Agent binding**     | The ABM rule id bound to this node, if any. Check "no binding" to remove an existing binding.                              |
 
@@ -984,8 +984,9 @@ nodes:
     tioe_class: <T | I | OE | none>
     initial_value: <number>
     unit: <string>
-    lower_collar: <number 0..1, optional>
-    upper_collar: <number 0..1, optional>
+    lower_collar: <deprecated — use collar: block>
+    # Instead:
+    collar: { lower: <number>, upper: <number>, approach: hard }
 
 edges:
   - id: <unique-id>
@@ -1011,8 +1012,7 @@ nodes:
     tioe_class: I
     initial_value: 100
     unit: tasks
-    lower_collar: 0.1
-    upper_collar: 0.9
+    collar: { lower: 0, upper: 200 }
 
   - id: hiring_rate
     label: Hiring Rate
@@ -1093,8 +1093,7 @@ content and restart the dev server. For details on the programmatic API
 | `tioe_class`    | no        | `T` / `I` / `OE` / `none`      | `none`             | The Layer 3 financial category.                                                          |
 | `initial_value` | no        | number                         | `0`                | The starting value for simulation.                                                       |
 | `unit`          | no        | string                         | `""`               | The unit of measurement (e.g., "units", "units/week").                                   |
-| `lower_collar`  | no        | number (0–1)                   | omitted (no clamp) | Lower bound for the node's live loopy-animation value. Omit for no lower clamp.          |
-| `upper_collar`  | no        | number (0–1)                   | omitted (no clamp) | Upper bound for the node's live loopy-animation value. Must be ≥ `lower_collar`. Omit for no upper clamp. |
+| `collar`       | no        | `{ lower?, upper?, approach? }` | omitted (unbounded) | Physical bounds on the node's value, in the same units as `initial_value`. Enforced inside the simulation engine with anti-windup and backpressure. `approach` is `hard` (default) or `soft` (Phase 7). |
 | `pin`           | no        | `{ x: number, y: number }`     | omitted            | A fixed screen position. If omitted, the layout engine positions the node automatically. |
 
 #### Edge fields
@@ -1140,8 +1139,11 @@ of them at once (not just the first). Common issues:
 | `invalid_node_type` / `invalid_tioe_class`    | The `type` or `tioe_class` value is not one of the allowed options.    |
 | `invalid_polarity` / `invalid_delay_type`     | The `polarity` or `delay.type` value is not recognized.                |
 | `negative_delay` / `negative_strength`        | A delay magnitude or strength is negative.                             |
-| `collar_out_of_bounds`                        | A `lower_collar` or `upper_collar` is not a number in [0,1].           |
-| `collar_lower_above_upper`                    | A node's `lower_collar` is greater than its `upper_collar`.            |
+| `collar_ambiguous_units`                     | Legacy flat `lower_collar`/`upper_collar` fields present. Restate in the `collar:` block with physical units. |
+| `collar_lower_above_upper`                    | A node's `collar.lower` is not less than `collar.upper`. |
+| `collar_initial_out_of_range`                | The `initial_value` lies outside the `collar` bounds. |
+| `collar_invalid_approach`                    | `collar.approach` is not `"hard"` or `"soft"`. |
+| `range_invalid`                              | An edge `range` pair is not `[min, max]` with `min <= max`. |
 
 Fix all reported issues, then reload.
 

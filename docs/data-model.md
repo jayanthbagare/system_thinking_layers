@@ -17,16 +17,28 @@ Node {
   tioe_class: "T" | "I" | "OE" | "none"  // Layer 3 tag
   initial_value: number
   unit: string
-  lower_collar?: number                 // normalized [0,1] lower bound for the loopy animation value
-  upper_collar?: number                 // normalized [0,1] upper bound for the loopy animation value
+  collar?: Collar                         // physical bounds, same units as initial_value
   agent_binding?: AgentRuleRef           // present only if this node has an ABM companion
   pin?: { x: number; y: number }         // manual layout pin (view-derived, but persists)
   abm_verdict?: AbmVerdict               // written by the ABM companion (Phase 5)
 }
+
+Collar {
+  lower?: number     // physical lower bound; engine clamps value to >= lower
+  upper?: number     // physical upper bound; engine clamps value to <= upper
+  approach?: "hard" | "soft"   // hard (default) clips; soft ramps (Phase 7)
+}
 ```
 
 `type` uses stock-flow semantics rather than a generic CLD box, because the
-Layer 3 simulation engine treats stocks as accumulators and flows as rates.
+simulation engine treats stocks as accumulators and flows as rates. Collars are
+physical bounds enforced inside the engine (`src/sim/engine.ts`): the value is
+clamped after the derivative is computed, with anti-windup (excess does not
+accumulate) and reject-and-backpressure (excess returns to delay queues). A
+collar is a fact about the system in the system's own units — not a display
+clamp. Legacy flat `lower_collar`/`upper_collar` fields (normalized [0,1]) are
+rejected at parse time with `collar_ambiguous_units`; authors must restate them
+in the `collar:` block with physical units.
 
 ## Edge
 
@@ -41,6 +53,12 @@ Edge {
     magnitude: number        // in model time units
   }
   strength: number           // relative influence weight, for simulation
+  range?: EdgeRange           // authored uncertainty (Phase 8 sampler; not engine-enforced)
+}
+
+EdgeRange {
+  strength?: [number, number]         // [min, max] range for the edge's strength
+  delay_magnitude?: [number, number]  // [min, max] range for delay.magnitude
 }
 ```
 

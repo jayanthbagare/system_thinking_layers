@@ -30,9 +30,12 @@
  *     `SimState.delayQueues` (this is what Phase 2 §2.4 needs for Throughput
  *     Accounting and reject-and-backpressure).
  *
- * Collars are NOT enforced here yet. The existing `lower_collar`/`upper_collar`
- * fields are normalised display clamps that Phase 2 migrates to physical bounds
- * enforced inside this engine. For Phase 1 they are inert.
+ * Collars ARE enforced here (Phase 2). Each node's optional `collar` block
+ * (physical lower/upper bounds in the node's own units) is applied inside
+ * `stepEuler`: the state is clamped after the derivative is computed, with
+ * anti-windup (excess does not accumulate) and reject-and-backpressure (excess
+ * returns to delay queues or stays with the source). A collar-free node behaves
+ * exactly as it did in Phase 1.
  *
  * The engine is pure: given the same `(graph, state, opts)` it produces the
  * same next state. No hidden time, no RNG. A `SimState` is a value object the
@@ -126,7 +129,20 @@ export function run(graph: Graph, state: SimState, opts: EngineOptions, steps: n
 
 /**
  * The canonical discrete advance (one Euler step). This is the only place the
- * FIFO pipelines move and the only place stock/flow values change.
+ * FIFO pipelines move, the only place stock/flow values change, and — from
+ * Phase 2 — the only place collars are enforced.
+ *
+ * Collar enforcement (spec §2.3):
+ *   - **Clamp the state, not the derivative.** The derivative (rates, delivers)
+ *     is computed normally; the resulting state is then bounded.
+ *   - **Anti-windup is mandatory.** If a stock is pinned at its upper collar
+ *     and inflow continues, the excess does NOT accumulate. For delayed edges
+ *     the rejected material goes back to the front of the pipeline
+ *     (reject-and-backpressure, §2.4). For non-delayed edges the source stock
+ *     keeps the undelivered material. A lower-pinned stock's excess outflow
+ *     simply does not happen — no phantom lag.
+ *   - **Event detection.** The exact excess is computed and distributed back
+ *     proportionally, so the stock lands on the boundary, not past it.
  */
 function stepEuler(graph: Graph, state: SimState, opts: EngineOptions): SimState {
   const dt = opts.dt;
@@ -135,69 +151,174 @@ function stepEuler(graph: Graph, state: SimState, opts: EngineOptions): SimState
   const rates: Record<string, number> = {};
   for (const e of graph.edges) rates[e.id] = edgeRate(e, state.values);
 
-  // Advance every delayed edge's pipeline: pop the front (delivered mass),
-  // push the new chunk onto the back.
+  // Phase 1: pop queue fronts (potential deliver); do NOT push backs yet.
   const delayQueues: Record<string, number[]> = {};
-  const delivered: Record<string, number> = {};
+  const potentialDeliver: Record<string, number> = {};
+  const isDelayed: Record<string, boolean> = {};
   for (const e of graph.edges) {
     const slots = slotsByEdge[e.id];
     if (slots > 0) {
+      isDelayed[e.id] = true;
       const q = state.delayQueues[e.id] ? state.delayQueues[e.id].slice() : new Array<number>(slots).fill(0);
       while (q.length < slots) q.unshift(0);
-      delivered[e.id] = q.shift() ?? 0;
-      q.push(rates[e.id] * dt);
-      delayQueues[e.id] = q;
+      potentialDeliver[e.id] = q.shift() ?? 0;
+      delayQueues[e.id] = q; // queue without front; back pushed later
     } else {
-      delivered[e.id] = rates[e.id] * dt;
+      isDelayed[e.id] = false;
+      potentialDeliver[e.id] = rates[e.id] * dt;
     }
   }
 
-  // Update node values. Stocks integrate net flow; flows/auxiliaries reflect
-  // the rate delivered to them this step; exogenous nodes (no incoming edges)
-  // hold their value.
   const incomingByNode = groupIncoming(graph);
   const outgoingByNode = groupOutgoing(graph);
-  const nodeById = new Map(graph.nodes.map((n): [string, Node] => [n.id, n]));
+
+  // Phase 2: compute candidate stock values (pre-clamp).
+  const stockCandidates: Record<string, number> = {};
+  for (const n of graph.nodes) {
+    if (n.type !== "stock") continue;
+    const prev = state.values[n.id] ?? 0;
+    let totalIn = 0;
+    for (const e of incomingByNode.get(n.id) ?? []) totalIn += potentialDeliver[e.id];
+    let totalOut = 0;
+    for (const e of outgoingByNode.get(n.id) ?? []) totalOut += rates[e.id] * dt;
+    stockCandidates[n.id] = prev + totalIn - totalOut;
+  }
+
+  // Phase 3: enforce upper collars (backpressure) and lower collars (cap
+  // outflow). Adjust delivers and outflows; excess goes back to queues or
+  // stays with the source. This is the event-detection step: compute the
+  // exact crossing and handle the excess, rather than naive post-clip.
+  const actualDeliver: Record<string, number> = { ...potentialDeliver };
+  const actualOutflow: Record<string, number> = {};
+  for (const e of graph.edges) actualOutflow[e.id] = rates[e.id] * dt;
+  // Track which nodes were clamped in Phase 3 so Phase 4 can mark them pinned
+  // even when the adjusted candidate lands exactly on the boundary (==, not >).
+  const clampedUpper = new Set<string>();
+  const clampedLower = new Set<string>();
+
+  for (const n of graph.nodes) {
+    if (n.type !== "stock") continue;
+    const candidate = stockCandidates[n.id];
+    const collar = n.collar;
+    if (!collar) continue;
+    if (collar.upper !== undefined && candidate > collar.upper) {
+      clampedUpper.add(n.id);
+      // Backpressure: reduce incoming delivers so the stock lands on upper.
+      const excess = candidate - collar.upper;
+      const incoming = incomingByNode.get(n.id) ?? [];
+      let totalIn = 0;
+      for (const e of incoming) totalIn += potentialDeliver[e.id];
+      if (totalIn > 0) {
+        const rejectFraction = Math.min(1, excess / totalIn);
+        for (const e of incoming) {
+          const rejected = actualDeliver[e.id] * rejectFraction;
+          actualDeliver[e.id] -= rejected;
+          if (isDelayed[e.id]) {
+            // Material stays in the pipeline (reject-and-backpressure, §2.4).
+            delayQueues[e.id].unshift(rejected);
+          }
+          // For non-delayed edges, the source keeps the undelivered material:
+          // actualOutflow will be synced to actualDeliver below.
+        }
+      }
+    } else if (collar.lower !== undefined && candidate < collar.lower) {
+      clampedLower.add(n.id);
+      // Cap outflow so the stock lands on lower. The excess outflow simply
+      // does not happen — no phantom lag, no windup (§2.3 anti-windup).
+      const excess = collar.lower - candidate;
+      const outgoing = outgoingByNode.get(n.id) ?? [];
+      let totalOut = 0;
+      for (const e of outgoing) totalOut += rates[e.id] * dt;
+      if (totalOut > 0) {
+        const rejectFraction = Math.min(1, excess / totalOut);
+        for (const e of outgoing) {
+          actualOutflow[e.id] -= actualOutflow[e.id] * rejectFraction;
+        }
+      }
+    }
+  }
+
+  // For non-delayed edges, outflow = deliver (the same flow seen from both
+  // ends). Sync after backpressure adjustments so conservation holds: the
+  // source only loses what the target actually absorbed.
+  for (const e of graph.edges) {
+    if (!isDelayed[e.id]) {
+      const min = Math.min(actualDeliver[e.id], actualOutflow[e.id]);
+      actualDeliver[e.id] = min;
+      actualOutflow[e.id] = min;
+    }
+  }
+
+  // Phase 4: compute final values from adjusted delivers/outflows, and
+  // apply a final clamp (handles any residual from proportional rounding).
+  // A node clamped in Phase 3 is marked pinned even if the adjusted candidate
+  // lands exactly on the boundary (==, not >), because backpressure held it there.
   const values: Record<string, number> = {};
-  const pinned: Record<string, "lower" | "upper" | null> = { ...state.pinned };
+  const pinned: Record<string, "lower" | "upper" | null> = {};
   for (const n of graph.nodes) {
     const prev = state.values[n.id] ?? 0;
     if (n.type === "stock") {
-      let d = 0;
-      for (const e of incomingByNode.get(n.id) ?? []) d += delivered[e.id];
-      for (const e of outgoingByNode.get(n.id) ?? []) d -= rates[e.id] * dt;
-      values[n.id] = prev + d;
+      let totalIn = 0;
+      for (const e of incomingByNode.get(n.id) ?? []) totalIn += actualDeliver[e.id];
+      let totalOut = 0;
+      for (const e of outgoingByNode.get(n.id) ?? []) totalOut += actualOutflow[e.id];
+      let candidate = prev + totalIn - totalOut;
+      const collar = n.collar;
+      if (collar?.upper !== undefined && (candidate > collar.upper || clampedUpper.has(n.id))) {
+        candidate = collar.upper;
+        pinned[n.id] = "upper";
+      } else if (collar?.lower !== undefined && (candidate < collar.lower || clampedLower.has(n.id))) {
+        candidate = collar.lower;
+        pinned[n.id] = "lower";
+      } else {
+        pinned[n.id] = null;
+      }
+      values[n.id] = candidate;
     } else {
       const incoming = incomingByNode.get(n.id) ?? [];
       if (incoming.length === 0) {
         values[n.id] = prev; // exogenous driver: hold initial_value
       } else {
         let v = 0;
-        for (const e of incoming) v += delivered[e.id];
+        for (const e of incoming) v += actualDeliver[e.id];
         values[n.id] = v / dt;
       }
+      // Apply collars to flow/auxiliary nodes too.
+      const collar = n.collar;
+      if (collar?.upper !== undefined && values[n.id] > collar.upper) {
+        values[n.id] = collar.upper;
+        pinned[n.id] = "upper";
+      } else if (collar?.lower !== undefined && values[n.id] < collar.lower) {
+        values[n.id] = collar.lower;
+        pinned[n.id] = "lower";
+      } else {
+        pinned[n.id] = null;
+      }
     }
-    void nodeById;
   }
+
+  // Phase 5: push new chunks to queue backs (using actual outflow, so a
+  // lower-pinned source pushes less into the pipeline).
+  for (const e of graph.edges) {
+    if (isDelayed[e.id]) {
+      delayQueues[e.id].push(actualOutflow[e.id]);
+    }
+  }
+
   const history = appendHistory(state.history, values, graph);
   return { t: state.t + dt, values, history, delayQueues, pinned };
 }
 
 /**
- * RK4 on the stock ODE sub-system, with the FIFO queue fronts treated as
- * exogenous (constant) inputs within the step. For Phase 1's linear stock
- * dynamics this is exactly equivalent to Euler; the 4-stage machinery is in
- * place so Phase 2's non-linear collar approach can use it for genuine 4th-order
- * accuracy at boundaries. Queues advance once, by the full step, after the
- * weighted stock update is computed.
+ * RK4 on the stock ODE sub-system. Phase 2's collar clamps introduce a
+ * non-linearity (a kink at the boundary). The current implementation delegates
+ * to Euler because the FIFO-queue-fed stock dynamics are linear between
+ * collar events, and the clamp is handled inside the Euler step's enforcement
+ * phase. True 4th-order staging across the kink would require sub-stepping
+ * to the event and is deferred. Per spec §2.3: when a node is pinned under
+ * RK4, accuracy is reduced at the boundary — the UI should warn.
  */
 function stepRK4(graph: Graph, state: SimState, opts: EngineOptions): SimState {
-  // For the linear, queue-fed stock subsystem, RK4 == Euler (all four stages
-  // sample the same derivative because the derivative depends only on current
-  // values and the fixed queue fronts, both of which are constant across the
-  // stages when stocks haven't moved yet). Delegating keeps the selector honest
-  // and avoids duplicating the queue logic; Phase 2 reintroduces true staging
-  // once collar clamp dynamics make the stock derivative non-linear in state.
   return stepEuler(graph, state, opts);
 }
 
@@ -258,6 +379,34 @@ export function totalMass(graph: Graph, state: SimState): number {
   for (const n of graph.nodes) if (n.type === "stock") m += state.values[n.id] ?? 0;
   for (const q of Object.values(state.delayQueues)) for (const v of q) m += v;
   return m;
+}
+
+/**
+ * Degrees of freedom: the count of nodes NOT currently pinned at a collar.
+ * Every pinned node is a lost dimension — the constraint is precisely the
+ * dimension that was lost. This tells an architect how much room the system
+ * has left. Unbounded nodes (no collar) are always free.
+ */
+export function degreesOfFreedom(graph: Graph, state: SimState): number {
+  let free = 0;
+  for (const n of graph.nodes) {
+    const p = state.pinned[n.id];
+    if (p === null || p === undefined) free++;
+  }
+  return free;
+}
+
+/**
+ * Headroom for a single node: `(upper - current) / (upper - lower)` as a
+ * fraction in [0,1]. 1 = at the lower bound (full room above); 0 = at the
+ * upper bound (no room). Returns null for unbounded nodes.
+ */
+export function headroom(node: Node, value: number): number | null {
+  const c = node.collar;
+  if (!c || c.upper === undefined || c.lower === undefined) return null;
+  const span = c.upper - c.lower;
+  if (span <= 0) return null;
+  return Math.max(0, Math.min(1, (c.upper - value) / span));
 }
 
 /** T/I/OE aggregation by tag (the L3 fallback; Phase 3 derives this properly). */
