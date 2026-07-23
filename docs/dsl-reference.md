@@ -44,6 +44,8 @@ A working fixture lives at
 | `tioe_class` | no | `T` \| `I` \| `OE` \| `none` | `none` |
 | `initial_value` | no | number | `0` |
 | `unit` | no | string | `""` |
+| `lower_collar` | no | number (0–1) | omitted (no lower clamp) |
+| `upper_collar` | no | number (0–1) | omitted (no upper clamp) |
 | `agent_binding` | no | `{ rule_id: string }` | omitted |
 | `pin` | no | `{ x: number, y: number }` | omitted (auto-layout) |
 

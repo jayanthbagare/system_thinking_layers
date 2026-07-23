@@ -77,6 +77,7 @@ unfamiliar.
 | **Signal**               | A pulse that travels along an edge carrying a value change. When you nudge a node, a signal rides every outgoing arrow; when it lands, the target node's value shifts and a fresh signal rides onward. This is the live "running the network" animation — reinforcing loops amplify the pulse, balancing loops dampen it. |
 | **Nudge**                | A small push to a node's value via the ▲/▼ arrows that appear on hover. Up grows the value (positive direction); down shrinks it (negative direction). The signed change propagates to the next node and around the loop.                                                                              |
 | **Value circle**         | The filled circle inside each node. Its radius encodes the node's current value (bigger = higher); its color encodes the direction of drift (green = above rest, red = below rest). Updates live as pulses circulate.                                                                                  |
+| **Collar**               | An optional upper and/or lower bound on a node's live (normalized) value, authored in the YAML as `lower_collar` and `upper_collar` (both in [0,1]). The loopy animation clamps the node's value to stay within its collar, so a node cannot drift beyond a sane range. Omit both for no clamping (the value may drift freely). |
 | **Node monitor**         | A right-side panel (L1 only) that plots node values over time as sparklines. In small graphs (< 7 nodes) all nodes are shown; in larger graphs a dropdown picks one. Lets you watch oscillation and amplification unfold as the live animation runs. |
 | **Intervention**         | A hypothetical change you make to one node to see what would happen — "what if we doubled capacity here?"                                                                                                                                                                                              |
 | **Agent**                | An individual actor in the system — one warehouse, one customer, one machine. The ABM view simulates many agents individually and sees what emerges in aggregate.                                                                                                                                      |
@@ -131,7 +132,7 @@ section 5). You can start exploring immediately.
 | Command             | What it does                                                                                                                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run build`     | Creates a production build in the `dist/` folder. You can open `dist/index.html` directly in a browser, or deploy it to any static host. |
-| `npm test`          | Runs the test suite (158 automated tests). Not needed for normal use.                                                                    |
+| `npm test`          | Runs the test suite (181 automated tests). Not needed for normal use.                                                                    |
 | `npm run lint`      | Checks code quality. Only relevant if you are editing the source.                                                                        |
 | `npm run typecheck` | Checks TypeScript types. Only relevant if you are editing the source.                                                                    |
 
@@ -355,6 +356,7 @@ diagram with no overlays.
 | **Click ▼ on a hovered node**                         | Nudges the node's value down. Emits a negative pulse onto every outgoing edge — the growth direction is "down" to the next node and onward. The node's inner value circle shrinks. |
 | **Drag a node** (click and hold a circle, move mouse) | The node moves. Its position is saved as a "pin" and will survive a save/load. The layout engine briefly re-adjusts surrounding nodes. (Dragging is suppressed while pressing an arrow.) |
 | **Hover over a loop label** (R1, B1, etc.)            | That specific loop highlights — its edges and nodes stay bright, everything else dims.                                                 |
+| **Shift-click a node**                                | Opens the **edit modal** for that node (see "Editing a node" below). Lets you change the node's properties and write them back to the YAML. Does not nudge the value. |
 | **Pan the canvas** (click and drag the background)    | The whole diagram moves.                                                                                                               |
 | **Zoom** (mouse wheel or trackpad scroll)             | Zooms in and out. Range: 0.2× to 4×.                                                                                                   |
 | **Double-click the background**                       | Resets the zoom to 100% (does not re-layout).                                                                                          |
@@ -407,6 +409,45 @@ Reset to return every node to its rest value before a new experiment.
 > visualization aid. The only thing a nudge pushes outward (beyond the
 > canvas) is a signal to Layer 3's sparklines, so they re-simulate from
 > what you just poked (see section 8).
+
+### Editing a node (edit mode)
+
+Layer 1 has an **edit mode** for changing a node's properties without
+leaving the canvas. It is triggered by **shift-clicking** a node — this
+opens a modal dialog showing every editable field of that node:
+
+| Field                 | What it controls                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Label**             | The human-readable name shown on the diagram.                                                                              |
+| **Type**              | `stock`, `flow`, or `auxiliary` (see glossary).                                                                            |
+| **TIOE class**        | `T`, `I`, `OE`, or `none` — the Layer 3 financial category.                                                                |
+| **Initial value**     | The starting value for quantitative simulation.                                                                             |
+| **Unit**              | The unit of measurement (e.g., "units/week").                                                                              |
+| **Lower collar**      | The lower bound (in [0,1]) for the node's live loopy value. The animation clamps the value to stay at or above this.       |
+| **Upper collar**      | The upper bound (in [0,1]) for the node's live loopy value. The animation clamps the value to stay at or below this.       |
+| **Pin x / y**         | The node's fixed screen position. Check "auto-layout (clear pin)" to remove the pin and let the layout engine place it.   |
+| **Agent binding**     | The ABM rule id bound to this node, if any. Check "no binding" to remove an existing binding.                              |
+
+When you click **Save**, the app:
+
+1. **Validates** the candidate node against the full graph — if the edit
+   would break the model (e.g., an invalid collar range), an error
+   message appears and the save is blocked.
+2. **Applies** the change to the in-memory graph (the single source of
+   truth).
+3. **Re-renders** the canvas and refreshes the Layer 2 and Layer 3
+   panels so they reflect the edited node.
+4. **Downloads** the updated graph serialized back to YAML
+   (`graph.yaml`), so you can keep the edited model as a file.
+
+> **Why shift-click?** Plain click stays reserved for selecting/inspecting
+> a node, and the ▲/▼ nudge arrows handle value changes. Shift-click is
+> an explicit "I want to edit the structure" gesture that won't fire
+> accidentally.
+
+The downloaded YAML is in the same authoring format as the built-in
+fixture (see section 11), so you can drop it into `public/examples/` and
+it will load on the next startup.
 
 ### Why loops matter
 
@@ -941,6 +982,8 @@ nodes:
     tioe_class: <T | I | OE | none>
     initial_value: <number>
     unit: <string>
+    lower_collar: <number 0..1, optional>
+    upper_collar: <number 0..1, optional>
 
 edges:
   - id: <unique-id>
@@ -966,6 +1009,8 @@ nodes:
     tioe_class: I
     initial_value: 100
     unit: tasks
+    lower_collar: 0.1
+    upper_collar: 0.9
 
   - id: hiring_rate
     label: Hiring Rate
@@ -1046,6 +1091,8 @@ content and restart the dev server. For details on the programmatic API
 | `tioe_class`    | no        | `T` / `I` / `OE` / `none`      | `none`             | The Layer 3 financial category.                                                          |
 | `initial_value` | no        | number                         | `0`                | The starting value for simulation.                                                       |
 | `unit`          | no        | string                         | `""`               | The unit of measurement (e.g., "units", "units/week").                                   |
+| `lower_collar`  | no        | number (0–1)                   | omitted (no clamp) | Lower bound for the node's live loopy-animation value. Omit for no lower clamp.          |
+| `upper_collar`  | no        | number (0–1)                   | omitted (no clamp) | Upper bound for the node's live loopy-animation value. Must be ≥ `lower_collar`. Omit for no upper clamp. |
 | `pin`           | no        | `{ x: number, y: number }`     | omitted            | A fixed screen position. If omitted, the layout engine positions the node automatically. |
 
 #### Edge fields
@@ -1091,6 +1138,8 @@ of them at once (not just the first). Common issues:
 | `invalid_node_type` / `invalid_tioe_class`    | The `type` or `tioe_class` value is not one of the allowed options.    |
 | `invalid_polarity` / `invalid_delay_type`     | The `polarity` or `delay.type` value is not recognized.                |
 | `negative_delay` / `negative_strength`        | A delay magnitude or strength is negative.                             |
+| `collar_out_of_bounds`                        | A `lower_collar` or `upper_collar` is not a number in [0,1].           |
+| `collar_lower_above_upper`                    | A node's `lower_collar` is greater than its `upper_collar`.            |
 
 Fix all reported issues, then reload.
 

@@ -6,6 +6,9 @@
 # (production capacity), producing the oscillation characteristic of the system.
 #
 # Loops are NOT authored here — they are computed from the edges (src/graph).
+#
+# Each node carries an upper/lower collar: normalized [0,1] bounds that clamp
+# the node's live loopy-animation value so it cannot drift beyond a sane range.
 
 nodes:
   - id: customer_demand
@@ -14,6 +17,8 @@ nodes:
     tioe_class: T
     initial_value: 100
     unit: units/week
+    lower_collar: 0.2
+    upper_collar: 0.9
 
   - id: retailer_backlog
     label: Retailer Backlog
@@ -21,6 +26,8 @@ nodes:
     tioe_class: I
     initial_value: 0
     unit: units
+    lower_collar: 0
+    upper_collar: 0.95
 
   - id: retailer_orders
     label: Retailer Orders
@@ -28,6 +35,8 @@ nodes:
     tioe_class: T
     initial_value: 100
     unit: units/week
+    lower_collar: 0.2
+    upper_collar: 0.9
 
   - id: wholesaler_backlog
     label: Wholesaler Backlog
@@ -35,6 +44,8 @@ nodes:
     tioe_class: I
     initial_value: 0
     unit: units
+    lower_collar: 0
+    upper_collar: 0.95
 
   - id: wholesaler_orders
     label: Wholesaler Orders
@@ -42,6 +53,8 @@ nodes:
     tioe_class: T
     initial_value: 100
     unit: units/week
+    lower_collar: 0.2
+    upper_collar: 0.9
 
   - id: production_capacity
     label: Production Capacity
@@ -49,6 +62,8 @@ nodes:
     tioe_class: OE
     initial_value: 100
     unit: units/week
+    lower_collar: 0.1
+    upper_collar: 1
 
 edges:
   - id: e1

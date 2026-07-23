@@ -5,6 +5,7 @@ import {
   MAX_SIGNALS_PER_EDGE,
   NUDGE_DELTA,
   REST_VALUE,
+  clampToCollar,
   initialLoopyState,
   nudge,
   resetLoopyState,
@@ -14,6 +15,11 @@ import {
 
 function node(id: string): Node {
   return { id, label: id, type: "stock", tioe_class: "none", initial_value: 0, unit: "u" };
+}
+
+/** A node with normalized live-value collars. */
+function collaredNode(id: string, lo: number, hi: number): Node {
+  return { ...node(id), lower_collar: lo, upper_collar: hi };
 }
 
 function edge(
@@ -180,5 +186,64 @@ describe("resetLoopyState", () => {
     expect(r.values.get("a")).toBe(REST_VALUE);
     expect(r.values.get("b")).toBe(REST_VALUE);
     expect(r.signals).toEqual([]);
+  });
+});
+
+describe("clampToCollar", () => {
+  it("clamps to the upper collar", () => {
+    const n = collaredNode("a", 0, 0.6);
+    expect(clampToCollar(0.9, n)).toBe(0.6);
+  });
+
+  it("clamps to the lower collar", () => {
+    const n = collaredNode("a", 0.3, 1);
+    expect(clampToCollar(0.1, n)).toBe(0.3);
+  });
+
+  it("leaves values within the collar unchanged", () => {
+    const n = collaredNode("a", 0.2, 0.8);
+    expect(clampToCollar(0.5, n)).toBe(0.5);
+  });
+
+  it("is a no-op when no collar is authored", () => {
+    expect(clampToCollar(5, node("a"))).toBe(5);
+    expect(clampToCollar(-1, undefined)).toBe(-1);
+  });
+});
+
+describe("collar clamping in the loopy engine", () => {
+  it("clamps a nudge that would exceed the upper collar", () => {
+    // a -> b, b has a tight upper collar of 0.55 (rest 0.5). A +0.2 nudge
+    // delivered to b would reach 0.7 but must clamp to 0.55.
+    const g: Graph = {
+      nodes: [node("a"), collaredNode("b", 0, 0.55)],
+      edges: [edge("e1", "a", "b", { strength: 1, polarity: "+" })],
+      loops: [],
+    };
+    let s = nudge(initialLoopyState(g), g, "a", 0.2);
+    s = step(s, g, 1);
+    expect(s.values.get("b")).toBeCloseTo(0.55);
+  });
+
+  it("clamps a nudge that would fall below the lower collar", () => {
+    const g: Graph = {
+      nodes: [node("a"), collaredNode("b", 0.45, 1)],
+      edges: [edge("e1", "a", "b", { strength: 1, polarity: "-" })],
+      loops: [],
+    };
+    let s = nudge(initialLoopyState(g), g, "a", 0.2);
+    s = step(s, g, 1);
+    expect(s.values.get("b")).toBeCloseTo(0.45);
+  });
+
+  it("clamps the nudged source node itself to its own collar", () => {
+    const g: Graph = {
+      nodes: [collaredNode("a", 0, 0.6), node("b")],
+      edges: [edge("e1", "a", "b")],
+      loops: [],
+    };
+    // Nudge a up by NUDGE_DELTA (0.33) -> 0.83, clamped to 0.6.
+    const s = nudge(initialLoopyState(g), g, "a", NUDGE_DELTA);
+    expect(s.values.get("a")).toBeCloseTo(0.6);
   });
 });

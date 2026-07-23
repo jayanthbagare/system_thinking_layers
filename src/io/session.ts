@@ -16,6 +16,7 @@ import type { Graph } from "@/model/types";
 import { validate } from "@/model/validate";
 import type { Weights } from "@/layer2/scoring";
 import { withComputedLoops } from "@/graph/loops";
+import { serializeGraphYaml } from "@/dsl/parser";
 
 export interface Session {
   version: 1;
@@ -83,6 +84,18 @@ function stripProtoKeys(value: unknown): unknown {
 export function downloadSession(graph: Graph, weights: Weights, filename = "layers-session.json"): void {
   const json = saveSession(graph, weights);
   const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Trigger a browser download of the graph serialized back to YAML. */
+export function downloadGraphYaml(graph: Graph, filename = "graph.yaml"): void {
+  const yaml = serializeGraphYaml(graph);
+  const blob = new Blob([yaml], { type: "text/yaml" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

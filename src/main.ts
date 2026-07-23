@@ -16,15 +16,36 @@ import { Layer2Panel } from "@/layer2";
 import { Layer3Panel } from "@/layer3";
 import { AbmPanel } from "@/abm";
 import { LayerSwitcher, type LayerControl } from "@/ui";
-import { downloadSession, uploadSession } from "@/io";
+import { downloadSession, downloadGraphYaml, uploadSession } from "@/io";
 import type { DEFAULT_WEIGHTS } from "@/layer2/scoring";
 import type { Node } from "@/model/types";
+import type { NodeEditPatch } from "@/layer1";
 // Vite ?raw import bundles the fixture as a string — no node:fs at runtime,
 // keeping the app client-side only (per spec: no backend).
 import beerFixture from "./fixtures/beer-distribution.yaml?raw";
 import "./styles.css";
 
 type Weights = typeof DEFAULT_WEIGHTS;
+
+/** Apply a NodeEditPatch to an existing node, preserving unedited optional fields. */
+function applyPatch(node: Node, patch: NodeEditPatch): Node {
+  const { pin, clearPin, agent_binding: _ab, clearAgentBinding, ...rest } = patch;
+  void _ab;
+  const next: Node = { ...node, ...rest };
+  if (clearPin) {
+    const { pin: _drop, ...noPin } = next;
+    void _drop;
+    return clearAgentBinding ? stripAgentBinding(noPin) : noPin;
+  }
+  if (pin) next.pin = pin;
+  return clearAgentBinding ? stripAgentBinding(next) : next;
+}
+
+function stripAgentBinding(node: Node): Node {
+  const { agent_binding: _drop, ...rest } = node;
+  void _drop;
+  return rest;
+}
 
 function main(): void {
   const root = document.getElementById("root");
@@ -76,6 +97,19 @@ function main(): void {
       // load-adjusted as the animation runs — the ranking reflects *active*
       // bottlenecks, not just structural ones.
       l2.setLiveValues(values);
+    },
+    onEditNode: (nodeId: string, patch: NodeEditPatch) => {
+      // Apply the validated edit to the in-memory Graph (single source of
+      // truth), re-render the canvas, refresh the side panels, and write the
+      // result back to YAML (spec §2: edit mode writes back to the yaml).
+      const idx = graph.nodes.findIndex((n: Node) => n.id === nodeId);
+      if (idx < 0) return;
+      const updated = applyPatch(graph.nodes[idx], patch);
+      graph.nodes[idx] = updated;
+      renderer.render(graph);
+      l2.setWeights(weights);
+      l3.setWeights(weights);
+      downloadGraphYaml(graph);
     },
   });
   renderer.render(graph);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { parseGraph, parseGraphOrThrow, serializeGraph, ParseError } from "@/dsl/parser";
+import { parseGraph, parseGraphOrThrow, serializeGraph, serializeGraphYaml, ParseError } from "@/dsl/parser";
 
 const examplesDir = fileURLToPath(new URL("../../public/examples", import.meta.url));
 
@@ -17,6 +17,33 @@ describe("parseGraph", () => {
     expect(graph!.nodes).toHaveLength(6);
     expect(graph!.edges).toHaveLength(7);
     expect(graph!.loops).toEqual([]); // computed in Phase 2, never authored
+  });
+
+  it("parses node collars authored in the fixture", () => {
+    const { graph, issues } = parseGraph(loadFixture("beer-distribution.yaml"));
+    expect(issues).toEqual([]);
+    const demand = graph!.nodes.find((n) => n.id === "customer_demand")!;
+    expect(demand.lower_collar).toBe(0.2);
+    expect(demand.upper_collar).toBe(0.9);
+    const capacity = graph!.nodes.find((n) => n.id === "production_capacity")!;
+    expect(capacity.lower_collar).toBe(0.1);
+    expect(capacity.upper_collar).toBe(1);
+  });
+
+  it("parses optional collars and omits them when absent", () => {
+    const yaml = `
+nodes:
+  - id: a
+    lower_collar: 0.1
+  - id: b
+edges: []
+`;
+    const { graph, issues } = parseGraph(yaml);
+    expect(issues).toEqual([]);
+    expect(graph!.nodes[0].lower_collar).toBe(0.1);
+    expect(graph!.nodes[0].upper_collar).toBeUndefined();
+    expect(graph!.nodes[1].lower_collar).toBeUndefined();
+    expect(graph!.nodes[1].upper_collar).toBeUndefined();
   });
 
   it("accepts JSON as well as YAML", () => {
@@ -104,5 +131,37 @@ nodes:
     const { graph, issues } = parseGraph("");
     expect(graph).toBeNull();
     expect(issues.length).toBeGreaterThan(0);
+  });
+});
+
+describe("serializeGraphYaml", () => {
+  it("round-trips: Graph -> YAML -> Graph is lossless for the beer fixture", () => {
+    const original = parseGraphOrThrow(loadFixture("beer-distribution.yaml"));
+    const yaml = serializeGraphYaml(original);
+    const reparsed = parseGraphOrThrow(yaml);
+    expect(reparsed).toEqual(original);
+  });
+
+  it("emits collars and delay as readable inline YAML", () => {
+    const original = parseGraphOrThrow(loadFixture("beer-distribution.yaml"));
+    const yaml = serializeGraphYaml(original);
+    expect(yaml).toContain("lower_collar: 0.2");
+    expect(yaml).toContain("upper_collar: 0.9");
+    expect(yaml).toContain("delay: { type: information, magnitude: 2 }");
+    expect(yaml).toContain("strength: 1.3");
+    // Loops are never serialized (computed, never authored).
+    expect(yaml).not.toContain("loops:");
+  });
+
+  it("omits optional fields when absent", () => {
+    const minimal = parseGraphOrThrow(`
+nodes:
+  - id: a
+edges: []
+`);
+    const yaml = serializeGraphYaml(minimal);
+    expect(yaml).not.toContain("lower_collar");
+    expect(yaml).not.toContain("pin");
+    expect(yaml).not.toContain("agent_binding");
   });
 });

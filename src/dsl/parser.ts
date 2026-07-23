@@ -63,6 +63,59 @@ export function serializeGraph(graph: Graph): string {
   return JSON.stringify(graph, null, 2);
 }
 
+/**
+ * Serialize a Graph to YAML in the authoring format used by the fixtures, so an
+ * in-app edit can be written back to a `.yaml` file and re-parsed losslessly.
+ * Loops are never emitted (computed, never authored). Optional fields (collars,
+ * pin, agent_binding) are omitted when absent so the output stays clean.
+ */
+export function serializeGraphYaml(graph: Graph): string {
+  const lines: string[] = [];
+  lines.push("nodes:");
+  for (const n of graph.nodes) {
+    lines.push(`  - id: ${yamlScalar(n.id)}`);
+    lines.push(`    label: ${yamlScalar(n.label)}`);
+    lines.push(`    type: ${yamlScalar(n.type)}`);
+    lines.push(`    tioe_class: ${yamlScalar(n.tioe_class)}`);
+    lines.push(`    initial_value: ${num(n.initial_value)}`);
+    lines.push(`    unit: ${yamlScalar(n.unit)}`);
+    if (n.lower_collar !== undefined) lines.push(`    lower_collar: ${num(n.lower_collar)}`);
+    if (n.upper_collar !== undefined) lines.push(`    upper_collar: ${num(n.upper_collar)}`);
+    if (n.pin) {
+      lines.push(`    pin: { x: ${num(n.pin.x)}, y: ${num(n.pin.y)} }`);
+    }
+    if (n.agent_binding) {
+      lines.push(`    agent_binding: { rule_id: ${yamlScalar(n.agent_binding.rule_id)} }`);
+    }
+  }
+  lines.push("edges:");
+  for (const e of graph.edges) {
+    lines.push(`  - id: ${yamlScalar(e.id)}`);
+    lines.push(`    source: ${yamlScalar(e.source)}`);
+    lines.push(`    target: ${yamlScalar(e.target)}`);
+    lines.push(`    polarity: ${yamlScalar(e.polarity)}`);
+    lines.push(`    delay: { type: ${yamlScalar(e.delay.type)}, magnitude: ${num(e.delay.magnitude)} }`);
+    lines.push(`    strength: ${num(e.strength)}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/** Format a number without trailing ".0" for integers (cleaner YAML). */
+function num(v: number): string {
+  return Number.isInteger(v) ? String(v) : String(v);
+}
+
+/** Quote a scalar only when needed (strings with special chars / colons). */
+function yamlScalar(v: string): string {
+  if (v === "") return '""';
+  // Quote if it contains a YAML-significant char or leading/trailing space.
+  if (/[:#{}[\],&*!|>'"%@` \n]/.test(v) || v !== v.trim()) {
+    return JSON.stringify(v);
+  }
+  return v;
+}
+
 function safeLoad(input: string): unknown {
   try {
     return yaml.load(input, { schema: yaml.CORE_SCHEMA, json: true });
@@ -89,6 +142,8 @@ interface RawNode {
   tioe_class?: string;
   initial_value?: number;
   unit?: string;
+  lower_collar?: number;
+  upper_collar?: number;
   agent_binding?: { rule_id?: string };
   pin?: { x?: number; y?: number };
 }
@@ -126,6 +181,10 @@ function normalizeNode(r: RawNode): Node {
     r.agent_binding && typeof r.agent_binding.rule_id === "string"
       ? { rule_id: r.agent_binding.rule_id }
       : undefined;
+  const lower_collar =
+    typeof r.lower_collar === "number" && !Number.isNaN(r.lower_collar) ? r.lower_collar : undefined;
+  const upper_collar =
+    typeof r.upper_collar === "number" && !Number.isNaN(r.upper_collar) ? r.upper_collar : undefined;
   return {
     id: r.id ?? "",
     label: r.label ?? r.id ?? "",
@@ -134,6 +193,8 @@ function normalizeNode(r: RawNode): Node {
     initial_value: r.initial_value ?? 0,
     unit: r.unit ?? "",
     ...(pin ? { pin } : {}),
+    ...(lower_collar !== undefined ? { lower_collar } : {}),
+    ...(upper_collar !== undefined ? { upper_collar } : {}),
     ...(agent_binding ? { agent_binding } : {}),
   };
 }

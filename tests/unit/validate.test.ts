@@ -11,6 +11,8 @@ function n(partial: Partial<Node>): Node {
     initial_value: partial.initial_value ?? 0,
     unit: partial.unit ?? "u",
     ...("pin" in partial ? { pin: partial.pin } : {}),
+    ...("lower_collar" in partial ? { lower_collar: partial.lower_collar } : {}),
+    ...("upper_collar" in partial ? { upper_collar: partial.upper_collar } : {}),
     ...("agent_binding" in partial ? { agent_binding: partial.agent_binding } : {}),
   };
 }
@@ -100,5 +102,31 @@ describe("validate", () => {
       [],
     );
     expect(validate(g).length).toBeGreaterThan(1);
+  });
+
+  it("accepts optional collars within [0,1]", () => {
+    const g = graph([n({ id: "a", lower_collar: 0.2, upper_collar: 0.9 })], []);
+    expect(validate(g)).toEqual([]);
+  });
+
+  it("accepts collars at the 0 and 1 extremes", () => {
+    const g = graph([n({ id: "a", lower_collar: 0, upper_collar: 1 })], []);
+    expect(validate(g)).toEqual([]);
+  });
+
+  it("rejects collars outside [0,1]", () => {
+    const g = graph([n({ id: "a", lower_collar: -0.1, upper_collar: 1.2 })], []);
+    const codes = validate(g).map((i) => i.code);
+    expect(codes).toContain("collar_out_of_bounds");
+  });
+
+  it("rejects lower_collar above upper_collar", () => {
+    const g = graph([n({ id: "a", lower_collar: 0.8, upper_collar: 0.2 })], []);
+    expect(validate(g).some((i) => i.code === "collar_lower_above_upper")).toBe(true);
+  });
+
+  it("accepts a single collar bound without the other", () => {
+    const g = graph([n({ id: "a", upper_collar: 0.7 })], []);
+    expect(validate(g)).toEqual([]);
   });
 });

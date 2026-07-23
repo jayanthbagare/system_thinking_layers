@@ -50,6 +50,7 @@ import {
   type Signal,
 } from "./signal";
 import { sparkline, type SparklineSeries } from "@/layer3";
+import { openEditModal, type NodeEditPatch } from "./editModal";
 
 /** A node as consumed by the simulation — model node + transient layout state. */
 export interface SimNode {
@@ -108,6 +109,15 @@ export interface RendererOptions {
    * this callback is the only outward channel.
    */
   onNudge?: (nodeId: string, direction: number) => void;
+  /**
+   * The user shift-clicked a node to open the edit modal (spec §2: edit mode).
+   * The renderer builds the modal from the node's current properties and emits
+   * the validated patch here; the host (main.ts) applies it to the in-memory
+   * `Graph` (single source of truth) and writes the result back to YAML. The
+   * renderer itself never mutates `Graph` — it only reads the node to
+   * populate the form and re-renders after the host has applied the patch.
+   */
+  onEditNode?: (nodeId: string, patch: NodeEditPatch) => void;
   /**
    * Periodically emitted while the loopy animation is running, carrying a
    * snapshot of every node's current value. Used by Layer 2 to load-adjust
@@ -829,7 +839,22 @@ export class Layer1Renderer {
         const loopId = loops.length > 0 ? loops[0].id : null;
         this.highlightLoop(loopId);
       })
-      .on("mouseleave", () => this.highlightLoop(null));
+      .on("mouseleave", () => this.highlightLoop(null))
+      // Shift-click opens the edit modal (spec §2: edit mode). A plain click
+      // stays a no-op here (nudges go through the up/down arrows below); the
+      // edit modal is the channel for writing node properties back to the YAML.
+      .on("click", (event, d) => {
+        if (!event.shiftKey) return;
+        if (!this.graph) return;
+        const node = this.graph.nodes.find((n) => n.id === d.id);
+        if (!node) return;
+        event.stopPropagation();
+        openEditModal(
+          node,
+          this.graph,
+          (patch) => this.opts.onEditNode?.(d.id, patch),
+        );
+      });
 
     // Loopy-style play: the up/down arrows revealed on hover nudge the node's
     // value up/down by NUDGE_DELTA. A nudge emits a signed signal onto every

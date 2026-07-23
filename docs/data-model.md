@@ -17,6 +17,8 @@ Node {
   tioe_class: "T" | "I" | "OE" | "none"  // Layer 3 tag
   initial_value: number
   unit: string
+  lower_collar?: number                 // normalized [0,1] lower bound for the loopy animation value
+  upper_collar?: number                 // normalized [0,1] upper bound for the loopy animation value
   agent_binding?: AgentRuleRef           // present only if this node has an ABM companion
   pin?: { x: number; y: number }         // manual layout pin (view-derived, but persists)
   abm_verdict?: AbmVerdict               // written by the ABM companion (Phase 5)

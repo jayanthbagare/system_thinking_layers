@@ -37,7 +37,9 @@ export type ValidationCode =
   | "loop_unknown_node"
   | "loop_unknown_edge"
   | "loop_sign_mismatch"
-  | "loop_not_closed";
+  | "loop_not_closed"
+  | "collar_out_of_bounds"
+  | "collar_lower_above_upper";
 
 export interface ValidationIssue {
   code: ValidationCode;
@@ -135,6 +137,41 @@ function validateNode(node: unknown, seen: Set<string>): ValidationIssue[] {
         ref: n.id,
       });
     }
+  }
+  const lo = n.lower_collar;
+  const hi = n.upper_collar;
+  if (lo !== undefined) {
+    if (typeof lo !== "number" || Number.isNaN(lo) || lo < 0 || lo > 1) {
+      issues.push({
+        code: "collar_out_of_bounds",
+        message: `node "${n.id}" lower_collar must be a number in [0,1]`,
+        ref: n.id,
+      });
+    }
+  }
+  if (hi !== undefined) {
+    if (typeof hi !== "number" || Number.isNaN(hi) || hi < 0 || hi > 1) {
+      issues.push({
+        code: "collar_out_of_bounds",
+        message: `node "${n.id}" upper_collar must be a number in [0,1]`,
+        ref: n.id,
+      });
+    }
+  }
+  if (
+    lo !== undefined &&
+    hi !== undefined &&
+    typeof lo === "number" &&
+    typeof hi === "number" &&
+    !Number.isNaN(lo) &&
+    !Number.isNaN(hi) &&
+    lo > hi
+  ) {
+    issues.push({
+      code: "collar_lower_above_upper",
+      message: `node "${n.id}" lower_collar (${lo}) must be <= upper_collar (${hi})`,
+      ref: n.id,
+    });
   }
   return issues;
 }

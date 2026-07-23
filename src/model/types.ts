@@ -24,6 +24,18 @@ export interface Node {
   tioe_class: TioeClass;
   initial_value: number;
   unit: string;
+  /**
+   * Normalized [0,1] lower bound (collar) for this node's live loopy value.
+   * The loopy animation clamps the node's value to >= lower_collar. Omit (or 0)
+   * for no lower clamp. Authored in the YAML alongside upper_collar.
+   */
+  lower_collar?: number;
+  /**
+   * Normalized [0,1] upper bound (collar) for this node's live loopy value.
+   * The loopy animation clamps the node's value to <= upper_collar. Omit (or 1)
+   * for no upper clamp. Must be >= lower_collar.
+   */
+  upper_collar?: number;
   /** Present only if this node has an ABM companion. Omit when absent. */
   agent_binding?: AgentRuleRef;
   /**

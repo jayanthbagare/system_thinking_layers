@@ -18,7 +18,7 @@
  * here as a view-layer animation, never on `Graph`.
  */
 
-import type { Edge, Graph } from "@/model/types";
+import type { Edge, Graph, Node } from "@/model/types";
 
 /** A pulse traveling along a single edge, from source (0) to target (1). */
 export interface Signal {
@@ -70,6 +70,26 @@ export function outgoingEdges(graph: Graph, nodeId: string): Edge[] {
 }
 
 /**
+ * Clamp a node's live (normalized) value to its authored collar. The collar is
+ * optional in the model: a missing bound means no clamp on that side (the
+ * value may drift beyond [0,1], as documented in `LoopyState`). Authoring
+ * `lower_collar`/`upper_collar` opts a node into bounds. Pure.
+ */
+export function clampToCollar(value: number, node: Node | undefined): number {
+  if (!node) return value;
+  const lo = node.lower_collar;
+  const hi = node.upper_collar;
+  if (lo !== undefined && value < lo) return lo;
+  if (hi !== undefined && value > hi) return hi;
+  return value;
+}
+
+/** Look up a node by id (stable order from the graph). */
+function nodeById(graph: Graph, id: string): Node | undefined {
+  return graph.nodes.find((n) => n.id === id);
+}
+
+/**
  * Nudge a node's value by `delta` and emit a signal onto each outgoing edge.
  * Pure: returns a new state. The emitted signal carries the raw `delta`
  * (edge strength/polarity are applied on delivery, not on emission — same as
@@ -82,7 +102,7 @@ export function nudge(
   delta: number,
 ): LoopyState {
   const values = new Map(state.values);
-  values.set(nodeId, (values.get(nodeId) ?? REST_VALUE) + delta);
+  values.set(nodeId, clampToCollar((values.get(nodeId) ?? REST_VALUE) + delta, nodeById(graph, nodeId)));
   const signals = state.signals.slice();
   for (const e of outgoingEdges(graph, nodeId)) {
     if (signals.length >= MAX_SIGNALS) break;
@@ -124,7 +144,10 @@ export function step(state: LoopyState, graph: Graph, speed: number): LoopyState
   // delivery, and the same delta keeps circulating).
   let signals = inFlight;
   for (const d of deliveries) {
-    values.set(d.nodeId, (values.get(d.nodeId) ?? REST_VALUE) + d.delta);
+    values.set(
+      d.nodeId,
+      clampToCollar((values.get(d.nodeId) ?? REST_VALUE) + d.delta, nodeById(graph, d.nodeId)),
+    );
     for (const e of outgoingEdges(graph, d.nodeId)) {
       if (signals.length >= MAX_SIGNALS) break;
       if (countOnEdge(signals, e.id) >= MAX_SIGNALS_PER_EDGE) continue;

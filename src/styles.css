@@ -782,3 +782,109 @@ input[type="range"]:focus-visible {
   height: 90px;
   display: block;
 }
+
+/* --- Node edit modal (spec §2: edit mode) ------------------------------ */
+/* Native <dialog> styled as a centered modal card. Opened on shift-click of
+ * a node; the form writes the edited node properties back to the YAML. */
+dialog.edit-modal {
+  border: 1px solid var(--c-node-stroke);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--c-text);
+  padding: 0;
+  max-width: 480px;
+  width: 90vw;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+}
+dialog.edit-modal::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+.edit-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+}
+.edit-modal-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.edit-modal-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.edit-modal-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: #777;
+}
+.edit-modal-row {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.edit-modal-label {
+  font-size: 0.85rem;
+  color: #555;
+}
+.edit-modal-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.edit-modal-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  border: 1px solid #bbb;
+  border-radius: 5px;
+  font: inherit;
+}
+.edit-modal-pin-row,
+.edit-modal-binding-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.edit-modal-pin-row .edit-modal-input,
+.edit-modal-binding-row .edit-modal-input {
+  flex: 1 1 6rem;
+  min-width: 4rem;
+}
+.edit-modal-pin-clear,
+.edit-modal-binding-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: #555;
+  white-space: nowrap;
+}
+.edit-modal-error {
+  color: var(--c-balancing);
+  font-size: 0.82rem;
+  min-height: 1em;
+}
+.edit-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.edit-modal-actions button {
+  padding: 6px 14px;
+  border: 1px solid #999;
+  border-radius: 6px;
+  background: #f5f5f5;
+  font: inherit;
+  cursor: pointer;
+}
+.edit-modal-actions button.is-primary {
+  background: var(--c-delay);
+  color: #fff;
+  border-color: var(--c-delay);
+}
