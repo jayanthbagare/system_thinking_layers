@@ -238,6 +238,26 @@ export function valueRadiusFraction(value: number): number {
   return 1 - (1 / value) * 0.1;
 }
 
+/**
+ * Map a loopy-style node value to a fill color and opacity for its inner
+ * "value" circle, so the circle's hue shows the direction of change and its
+ * intensity shows the magnitude — green (reinforcing) when the value is above
+ * rest, red (balancing) when below. This pairs with `valueRadiusFraction`
+ * (which encodes magnitude by size) so growth vs. shrinkage reads at a glance
+ * even without watching the radius animate. Pure and deterministic.
+ *
+ * `REST` matches `signal.REST_VALUE` (0.5); duplicated here to keep layout
+ * free of a dependency on the signal engine.
+ */
+export function valueColor(value: number): { fill: string; opacity: number } {
+  const REST = 0.5;
+  const d = value - REST;
+  const mag = Math.min(1, Math.abs(d));
+  const opacity = 0.3 + 0.55 * mag; // 0.30 at rest → 0.85 at full deviation
+  const fill = d >= 0 ? "#2e7d32" : "#c62828"; // --c-reinforcing / --c-balancing
+  return { fill, opacity };
+}
+
 function clamp01(v: number): number {
   if (Number.isNaN(v)) return 0;
   return v < 0 ? 0 : v > 1 ? 1 : v;

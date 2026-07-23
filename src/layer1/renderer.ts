@@ -37,6 +37,7 @@ import {
   loopLabel,
   polaritySymbol,
   shortenToCircleBounds,
+  valueColor,
   valueRadiusFraction,
   type Point,
 } from "./layout";
@@ -48,6 +49,7 @@ import {
   type LoopyState,
   type Signal,
 } from "./signal";
+import { sparkline, type SparklineSeries } from "@/layer3";
 
 /** A node as consumed by the simulation — model node + transient layout state. */
 export interface SimNode {
@@ -82,6 +84,13 @@ const DIMMED_CLASS = "is-dimmed";
 export interface RendererOptions {
   width: number;
   height: number;
+  /**
+   * Optional host element for a live "node monitor" sparkline that plots the
+   * last-nudged node's value over time as the loopy animation runs. The
+   * renderer owns this view (it owns the loopy state); passing a host keeps
+   * it a Layer 1 view, not parallel model state.
+   */
+  monitorHost?: HTMLElement;
   /** Highlight a loop when the user hovers/selects it. */
   onLoopHover?: (loop: Loop | null) => void;
   /** Persist a manual pin onto the Graph's node. */
@@ -125,8 +134,16 @@ export class Layer1Renderer {
   private playing = true;
   private rafId: number | null = null;
 
+  /** Live node monitor: rolling history of the last-nudged node's value. */
+  private monitorHost: HTMLElement | null = null;
+  private trackedNodeId: string | null = null;
+  private history: number[] = [];
+  private monitorT = 0;
+  private static readonly HISTORY_CAP = 200;
+
   constructor(svg: SVGSVGElement, opts: RendererOptions) {
     this.opts = opts;
+    this.monitorHost = opts.monitorHost ?? null;
     this.svg = select(svg);
     this.svg.attr("viewBox", `0 0 ${opts.width} ${opts.height}`);
 
@@ -157,11 +174,15 @@ export class Layer1Renderer {
     this.derived = deriveLoops(graph);
     this.activeLoopId = null;
     this.loopy = initialLoopyState(graph);
+    this.trackedNodeId = null;
+    this.history = [];
+    this.monitorT = 0;
     this.buildSimNodes();
     this.buildSimEdges();
     this.startSimulation();
     this.draw();
     this.startLoopyLoop();
+    this.renderMonitor();
   }
 
   /** Update only the loops (e.g. after an edit that changes edges). */
@@ -197,6 +218,7 @@ export class Layer1Renderer {
     this.sim?.stop();
     this.svg.on(".zoom", null);
     this.root.remove();
+    if (this.monitorHost) this.monitorHost.innerHTML = "";
   }
 
   /** Start (or resume) the loopy-style signal animation. */
@@ -215,8 +237,11 @@ export class Layer1Renderer {
   resetLoopy(): void {
     if (!this.graph) return;
     this.loopy = initialLoopyState(this.graph);
+    this.history = [];
+    this.monitorT = 0;
     this.drawSignals();
     this.styleNodeValues();
+    this.renderMonitor();
   }
 
   isPlaying(): boolean {
@@ -233,6 +258,7 @@ export class Layer1Renderer {
       this.loopy = stepLoopy(this.loopy, this.graph, SIGNAL_SPEED);
       this.drawSignals();
       this.styleNodeValues();
+      this.stepMonitor();
       this.rafId = requestAnimationFrame(tick);
     };
     this.rafId = requestAnimationFrame(tick);
@@ -274,7 +300,7 @@ export class Layer1Renderer {
     });
   }
 
-  /** Size each node's inner value circle from its loopy value (loopy-style). */
+  /** Size and color each node's inner value circle from its loopy value (loopy-style). */
   private styleNodeValues(): void {
     if (!this.loopy) return;
     this.nodeLayer
@@ -282,12 +308,90 @@ export class Layer1Renderer {
       .each((d, i, groups) => {
         const v = this.loopy?.values.get(d.id) ?? 0.5;
         const frac = valueRadiusFraction(v);
+        const { fill, opacity } = valueColor(v);
         const circle = select(groups[i]).select(".node-value-circle");
-        circle.attr("r", NODE_RADIUS * frac);
+        circle
+          .attr("r", NODE_RADIUS * frac)
+          .style("fill", fill)
+          .style("opacity", String(opacity));
       });
   }
 
   // --- internals ---------------------------------------------------------
+
+  /**
+   * Record the tracked node's current value and redraw the live monitor
+   * sparkline. Called once per animation frame while playing; a no-op if no
+   * host was provided or no node has been nudged yet.
+   */
+  private stepMonitor(): void {
+    if (!this.loopy || !this.monitorHost) return;
+    if (this.trackedNodeId === null) {
+      this.renderMonitor();
+      return;
+    }
+    const v = this.loopy.values.get(this.trackedNodeId) ?? 0.5;
+    this.history.push(v);
+    if (this.history.length > Layer1Renderer.HISTORY_CAP) this.history.shift();
+    this.monitorT += 1;
+    this.renderMonitor();
+  }
+
+  /**
+   * Render the live node monitor into its HTML host: the tracked node's label
+   * and current value, plus a sparkline of its value over the recent animation
+   * frames. This is a view over the loopy animation state only — it holds no
+   * model state and never writes to `Graph`.
+   */
+  private renderMonitor(): void {
+    const host = this.monitorHost;
+    if (!host) return;
+    host.innerHTML = "";
+    host.classList.add("node-monitor");
+    const header = document.createElement("div");
+    header.className = "node-monitor-head";
+    const title = document.createElement("span");
+    title.className = "node-monitor-title";
+    title.textContent = "Live node monitor";
+    const sub = document.createElement("span");
+    sub.className = "node-monitor-sub";
+    if (this.trackedNodeId === null) {
+      sub.textContent = "nudge a node to plot its value over time";
+      header.append(title, sub);
+      host.append(header);
+      return;
+    }
+    const label = this.graph?.nodes.find((n) => n.id === this.trackedNodeId)?.label ?? this.trackedNodeId;
+    const current = this.history.length > 0 ? this.history[this.history.length - 1] : 0.5;
+    sub.textContent = `${label} \u00b7 ${current.toFixed(2)}`;
+    header.append(title, sub);
+    host.append(header);
+
+    if (this.history.length < 2) return;
+    const series: SparklineSeries[] = [
+      {
+        label: "value",
+        color: "#1976d2",
+        points: this.history.map((y, i) => ({ x: i, y })),
+      },
+    ];
+    const sl = sparkline(series, { width: 240, height: 52 });
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", sl.viewBox);
+    svg.setAttribute("class", "node-monitor-svg");
+    svg.setAttribute("preserveAspectRatio", "none");
+    for (const p of sl.paths) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", p.d);
+      path.setAttribute("stroke", p.color);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke-width", "1.5");
+      path.setAttribute("stroke-linejoin", "round");
+      path.setAttribute("stroke-linecap", "round");
+      svg.append(path);
+    }
+    host.append(svg);
+  }
 
   private buildSimNodes(): void {
     if (!this.graph) return;
@@ -596,8 +700,14 @@ export class Layer1Renderer {
     const nudgeNode = (nodeId: string, dir: number, event: MouseEvent): void => {
       if (!this.graph || !this.loopy) return;
       this.loopy = nudgeState(this.loopy, this.graph, nodeId, dir * NUDGE_DELTA);
+      // Track this node for the live monitor and start a fresh history so the
+      // sparkline shows this nudge's effect from a clean baseline.
+      this.trackedNodeId = nodeId;
+      this.history = [];
+      this.monitorT = 0;
       this.styleNodeValues();
       this.drawSignals();
+      this.stepMonitor();
       this.opts.onNudge?.(nodeId, dir);
       event.stopPropagation();
     };

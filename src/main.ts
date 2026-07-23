@@ -48,9 +48,16 @@ function main(): void {
     dominant_loop: 1,
   };
 
+  // --- Live node monitor host (Layer 1 view; renderer owns its content) --
+  const monitorHost = document.createElement("aside");
+  monitorHost.setAttribute("aria-label", "Live node monitor");
+  monitorHost.className = "node-monitor-host";
+  root.append(monitorHost);
+
   const renderer = new Layer1Renderer(svg, {
     width: window.innerWidth,
     height: window.innerHeight,
+    monitorHost,
     onPin: (nodeId: string, pin: { x: number; y: number } | null) => {
       const idx = graph.nodes.findIndex((n: Node) => n.id === nodeId);
       if (idx < 0) return;
