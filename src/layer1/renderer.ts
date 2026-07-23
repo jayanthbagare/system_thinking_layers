@@ -41,14 +41,7 @@ import {
   valueRadiusFraction,
   type Point,
 } from "./layout";
-import {
-  NUDGE_DELTA,
-  initialLoopyState,
-  nudge as nudgeState,
-  step as stepLoopy,
-  type LoopyState,
-  type Signal,
-} from "./signal";
+import { createEngine, equilibrium, type Engine, type EngineOptions } from "@/sim";
 import { sparkline, type SparklineSeries } from "@/layer3";
 import { openEditModal, type NodeEditPatch } from "./editModal";
 
@@ -78,7 +71,11 @@ const NODE_RADIUS = 22;
 const ARROW_SIZE = 12; // chevron wing length (px) — loopy-style prominent head
 const POLARITY_BADGE_R = 11; // radius of the polarity badge at edge midpoint
 const NUDGE_ARROW_OFFSET = 12; // distance of the up/down nudge arrows from the node center
-const SIGNAL_SPEED = 0.035; // fraction of edge per animation frame (loopy-like)
+const ANIM_DT = 0.1; // model-time step per animation frame (the engine's stride)
+const ANIM_INTEGRATOR: EngineOptions["integrator"] = "rk4";
+/** A nudge is 10% of the node's operating-point scale, so it is visible relative
+ * to the node's own magnitude regardless of units. */
+const NUDGE_FRACTION = 0.1;
 const HIGHLIGHTED_CLASS = "is-highlighted";
 const DIMMED_CLASS = "is-dimmed";
 
@@ -97,15 +94,13 @@ export interface RendererOptions {
   /** Persist a manual pin onto the Graph's node. */
   onPin?: (nodeId: string, pin: Point | null) => void;
   /**
-   * A node's loopy-style up/down-arrow nudge was clicked (loopy-style play).
-   * The up arrow nudges the node's value up by `NUDGE_DELTA` (growth in the
-   * positive direction); the down arrow nudges it down by `NUDGE_DELTA`
-   * (growth in the negative direction). Either emits a signed signal onto the
-   * node's outgoing edges carrying that delta, so the direction of growth
-   * propagates to the next node and onward around the loop. `direction` is
-   * +1 for up, -1 for down; used to drive the Layer 3 intervention sign so
-   * the sparklines re-simulate from the canvas nudge. The loopy animation
-   * itself is view-only and never writes to `Graph` (per src/layer1/signal.ts);
+   * A node's up/down-arrow nudge was clicked. The up arrow nudges the node's
+   * value up; the down arrow nudges it down. Both call `engine.impulse` — the
+   * same call Layer 3 uses for an intervention — so a canvas nudge and an
+   * equivalent L3 Δ drive the same engine and produce the same trajectory.
+   * `direction` is +1 for up, -1 for down; used to drive the Layer 3
+   * intervention sign so the sparklines re-simulate from the canvas nudge.
+   * The live animation is a view over the engine and never writes to `Graph`;
    * this callback is the only outward channel.
    */
   onNudge?: (nodeId: string, direction: number) => void;
@@ -118,13 +113,6 @@ export interface RendererOptions {
    * populate the form and re-renders after the host has applied the patch.
    */
   onEditNode?: (nodeId: string, patch: NodeEditPatch) => void;
-  /**
-   * Periodically emitted while the loopy animation is running, carrying a
-   * snapshot of every node's current value. Used by Layer 2 to load-adjust
-   * its constraint scores live. Throttled to every ~30 frames (~500ms at
-   * 60fps) to avoid re-scoring every frame.
-   */
-  onLiveValues?: (values: Map<string, number>) => void;
 }
 
 export class Layer1Renderer {
@@ -146,8 +134,17 @@ export class Layer1Renderer {
   private heat: Map<string, number> | null = null;
   private readonly opts: RendererOptions;
 
-  /** Loopy-style signal simulation state (view-layer animation only). */
-  private loopy: LoopyState | null = null;
+  /**
+   * The unified simulation engine (Phase 1). L1 is a live view of this engine,
+   * running at a slow wall-clock rate and projected onto the canvas. The same
+   * engine class backs L3's pre/post runs and L2's sensitivity signal — one
+   * model, three readings. The renderer owns one `Engine` instance for the
+   * live animation; it never writes to `Graph`.
+   */
+  private engine: Engine | null = null;
+  /** Cached operating point (per-node mean over a long run), used to colour
+   * value circles by the sign of deviation. Recomputed on render. */
+  private equilib: Record<string, number> | null = null;
   private playing = true;
   private rafId: number | null = null;
 
@@ -162,10 +159,6 @@ export class Layer1Renderer {
   private static readonly HISTORY_CAP = 200;
   /** Show a sparkline per node when the graph is small enough to fit. */
   private static readonly ALL_NODES_THRESHOLD = 7;
-  /** Frame counter for throttling onLiveValues emissions. */
-  private liveFrame = 0;
-  private static readonly LIVE_EMIT_INTERVAL = 30;
-  private static readonly REST_VALUE = 0.5;
 
   constructor(svg: SVGSVGElement, opts: RendererOptions) {
     this.opts = opts;
@@ -199,15 +192,17 @@ export class Layer1Renderer {
     this.graph = graph;
     this.derived = deriveLoops(graph);
     this.activeLoopId = null;
-    this.loopy = initialLoopyState(graph);
+    this.engine = createEngine(graph, { dt: ANIM_DT, integrator: ANIM_INTEGRATOR });
+    this.equilib = equilibrium(graph, { dt: ANIM_DT, integrator: ANIM_INTEGRATOR });
     this.trackedNodeId = graph.nodes[0]?.id ?? null;
     this.histories = new Map();
+    this.cumulative = new Map();
     this.monitorBuilt = false;
     this.buildSimNodes();
     this.buildSimEdges();
     this.startSimulation();
     this.draw();
-    this.startLoopyLoop();
+    this.startLoop();
     this.buildMonitor();
   }
 
@@ -240,28 +235,28 @@ export class Layer1Renderer {
 
   /** Tear down: stop the simulation and remove DOM listeners. */
   destroy(): void {
-    this.stopLoopyLoop();
+    this.stopLoop();
     this.sim?.stop();
     this.svg.on(".zoom", null);
     this.root.remove();
     if (this.monitorHost) this.monitorHost.innerHTML = "";
   }
-  /** Start (or resume) the loopy-style signal animation. */
+  /** Start (or resume) the live animation: one engine step per frame. */
   play(): void {
     this.playing = true;
-    this.startLoopyLoop();
+    this.startLoop();
   }
 
-  /** Pause the signal animation. */
+  /** Pause the live animation. */
   pause(): void {
     this.playing = false;
-    this.stopLoopyLoop();
+    this.stopLoop();
   }
 
-  /** Reset all node values to rest and clear traveling signals. */
+  /** Reset the engine to the graph's initial state and clear the monitor. */
   resetLoopy(): void {
     if (!this.graph) return;
-    this.loopy = initialLoopyState(this.graph);
+    this.engine?.reset();
     this.histories = new Map();
     this.cumulative = new Map();
     this.buildMonitor();
@@ -273,24 +268,23 @@ export class Layer1Renderer {
     return this.playing;
   }
 
-  // --- loopy signal animation ------------------------------------------
+  // --- live animation (a view over the engine) -------------------------
 
-  private startLoopyLoop(): void {
+  private startLoop(): void {
     if (this.rafId !== null) return;
-    if (!this.graph || !this.loopy) return;
+    if (!this.graph || !this.engine) return;
     const tick = (): void => {
-      if (!this.playing || !this.graph || !this.loopy) return;
-      this.loopy = stepLoopy(this.loopy, this.graph, SIGNAL_SPEED);
+      if (!this.playing || !this.graph || !this.engine) return;
+      this.engine.step();
       this.drawSignals();
       this.styleNodeValues();
       this.stepMonitor();
-      this.emitLiveValues();
       this.rafId = requestAnimationFrame(tick);
     };
     this.rafId = requestAnimationFrame(tick);
   }
 
-  private stopLoopyLoop(): void {
+  private stopLoop(): void {
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
@@ -298,57 +292,66 @@ export class Layer1Renderer {
   }
 
   /**
-   * Emit a snapshot of every node's current loopy value via `onLiveValues`,
-   * throttled to every ~30 frames (~500ms). This is the bridge that lets
-   * Layer 2 load-adjust its constraint scores as the animation runs —
-   * the values are view-layer state, passed by value, never written to Graph.
+   * Render the engine's delay pipelines as traveling pulses. Each FIFO bucket
+   * of a delayed edge is a dot at fraction (i+0.5)/slots along the edge — a
+   * pulse "p of the way through" the delay. Zero-delay edges carry no pulse.
+   * The dot's colour follows the sign of the in-flight chunk (the signed rate
+   * that entered the pipeline), so reinforcing (+) and balancing (−) pulses
+   * read distinctly.
    */
-  private emitLiveValues(): void {
-    if (!this.loopy || !this.opts.onLiveValues) return;
-    this.liveFrame++;
-    if (this.liveFrame < Layer1Renderer.LIVE_EMIT_INTERVAL) return;
-    this.liveFrame = 0;
-    this.opts.onLiveValues(new Map(this.loopy.values));
-  }
-
-  /** Render the traveling pulses as small dots along each edge. */
   private drawSignals(): void {
-    if (!this.loopy) return;
+    if (!this.engine) return;
     const edgeById = new Map(this.simEdges.map((e) => [e.id, e]));
     this.signalLayer.selectAll("*").remove();
-    if (this.loopy.signals.length === 0) return;
+    const pulses: { edge: SimEdge; frac: number; sign: "pos" | "neg" }[] = [];
+    for (const [eid, q] of Object.entries(this.engine.state.delayQueues)) {
+      const e = edgeById.get(eid);
+      if (!e || q.length === 0) continue;
+      const slots = q.length;
+      for (let i = 0; i < slots; i++) {
+        const chunk = q[i];
+        if (chunk === 0) continue;
+        pulses.push({ edge: e, frac: (i + 0.5) / slots, sign: chunk >= 0 ? "pos" : "neg" });
+      }
+    }
+    if (pulses.length === 0) return;
     const dots = this.signalLayer
-      .selectAll<SVGCircleElement, Signal>("circle.signal")
-      .data(this.loopy.signals)
+      .selectAll<SVGCircleElement, (typeof pulses)[number]>("circle.signal")
+      .data(pulses)
       .enter()
       .append("circle")
       .attr("class", "signal")
       .attr("r", 5);
     dots.each((d, i, groups) => {
-      const e = edgeById.get(d.edgeId);
       const el = groups[i];
-      if (!e) {
-        el.setAttribute("visibility", "hidden");
-        return;
-      }
-      el.setAttribute("visibility", "visible");
-      const sx = e.source.x + (e.target.x - e.source.x) * d.position;
-      const sy = e.source.y + (e.target.y - e.source.y) * d.position;
+      const sx = d.edge.source.x + (d.edge.target.x - d.edge.source.x) * d.frac;
+      const sy = d.edge.source.y + (d.edge.target.y - d.edge.source.y) * d.frac;
       el.setAttribute("cx", String(sx));
       el.setAttribute("cy", String(sy));
-      el.setAttribute("data-sign", d.delta >= 0 ? "pos" : "neg");
+      el.setAttribute("data-sign", d.sign);
     });
   }
 
-  /** Size and color each node's inner value circle from its loopy value (loopy-style). */
+  /**
+   * Size and colour each node's inner value circle from the engine's physical
+   * value, normalised for *display only*. Normalisation maps the value to the
+   * [0,1] space the layout helpers expect (0.5 = the operating point), using
+   * the node's own scale (its operating-point magnitude, or initial value, or
+   * 1 as a floor). Colour is the sign of deviation from the operating point —
+   * green above, red below — so growth vs. decline reads at a glance.
+   */
   private styleNodeValues(): void {
-    if (!this.loopy) return;
+    if (!this.engine) return;
+    const eq = this.equilib ?? {};
     this.nodeLayer
       .selectAll<SVGGElement, SimNode>("g.node")
       .each((d, i, groups) => {
-        const v = this.loopy?.values.get(d.id) ?? 0.5;
-        const frac = valueRadiusFraction(v);
-        const { fill, opacity } = valueColor(v);
+        const raw = this.engine?.state.values[d.id] ?? 0;
+        const rest = eq[d.id] ?? 0;
+        const scale = Math.max(Math.abs(rest), Math.abs(this.initialOf(d.id)), 1);
+        const norm = 0.5 + 0.5 * clamp((raw - rest) / scale, -1, 1);
+        const frac = valueRadiusFraction(norm);
+        const { fill, opacity } = valueColor(norm);
         const circle = select(groups[i]).select(".node-value-circle");
         circle
           .attr("r", NODE_RADIUS * frac)
@@ -365,14 +368,15 @@ export class Layer1Renderer {
    * A no-op if no host was provided.
    */
   private stepMonitor(): void {
-    if (!this.loopy || !this.monitorHost || !this.graph) return;
+    if (!this.engine || !this.monitorHost || !this.graph) return;
+    const eq = this.equilib ?? {};
     for (const n of this.graph.nodes) {
-      const v = this.loopy.values.get(n.id) ?? 0.5;
+      const v = this.engine.state.values[n.id] ?? 0;
+      const rest = eq[n.id] ?? 0;
       const h = this.histories.get(n.id) ?? [];
       if (this.monitorMetric === "cumulative") {
         const cum = this.cumulative.get(n.id) ?? 0;
-        const delta = v - Layer1Renderer.REST_VALUE;
-        const newCum = cum + delta;
+        const newCum = cum + (v - rest);
         this.cumulative.set(n.id, newCum);
         h.push(newCum);
       } else {
@@ -469,7 +473,8 @@ export class Layer1Renderer {
    * Called every animation frame.
    */
   private updateMonitorValues(): void {
-    if (!this.monitorBuilt || !this.loopy || !this.graph || !this.monitorHost) return;
+    if (!this.monitorBuilt || !this.engine || !this.graph || !this.monitorHost) return;
+    const eq = this.equilib ?? {};
     const container = this.monitorHost.querySelector<HTMLElement>(
       '[data-role="monitor-sparklines"]',
     );
@@ -495,8 +500,11 @@ export class Layer1Renderer {
       const node = this.graph.nodes.find((n) => n.id === id);
       if (!node) continue;
       const hist = this.histories.get(id) ?? [];
-      const current = this.loopy.values.get(id) ?? 0.5;
-      const { fill } = valueColor(current);
+      const current = this.engine.state.values[id] ?? 0;
+      const rest = eq[id] ?? 0;
+      const scale = Math.max(Math.abs(rest), Math.abs(this.initialOf(id)), 1);
+      const norm = 0.5 + 0.5 * clamp((current - rest) / scale, -1, 1);
+      const { fill } = valueColor(norm);
       const slColor = this.monitorMetric === "cumulative" ? "#1976d2" : fill;
       const displayVal =
         this.monitorMetric === "cumulative"
@@ -856,13 +864,13 @@ export class Layer1Renderer {
         );
       });
 
-    // Loopy-style play: the up/down arrows revealed on hover nudge the node's
-    // value up/down by NUDGE_DELTA. A nudge emits a signed signal onto every
-    // outgoing edge — the delta's sign sets the direction of growth from this
-    // node to the next, and that sign keeps circulating around the loop.
+    // The up/down arrows revealed on hover nudge the node's value up/down.
+    // A nudge calls `engine.impulse` — the same operation Layer 3 uses for an
+    // intervention Δ — so a canvas nudge and an equivalent L3 Δ drive the same
+    // engine and produce the same trajectory (Phase 1 acceptance).
     const nudgeNode = (nodeId: string, dir: number, event: MouseEvent): void => {
-      if (!this.graph || !this.loopy) return;
-      this.loopy = nudgeState(this.loopy, this.graph, nodeId, dir * NUDGE_DELTA);
+      if (!this.graph || !this.engine) return;
+      this.engine.impulse(nodeId, dir * this.nudgeDeltaFor(nodeId));
       // Track this node for the live monitor (in single-node mode the dropdown
       // follows the nudge; in all-nodes mode every sparkline is already shown).
       this.trackedNodeId = nodeId;
@@ -897,6 +905,19 @@ export class Layer1Renderer {
       .on("mouseleave", () => this.highlightLoop(null));
   }
 
+  /** A node's authored `initial_value`, or 0 if not found. */
+  private initialOf(nodeId: string): number {
+    return this.graph?.nodes.find((n) => n.id === nodeId)?.initial_value ?? 0;
+  }
+
+  /** Per-node nudge magnitude: 10% of the node's operating-point scale, so a
+   * nudge is visible relative to the node's own magnitude regardless of units. */
+  private nudgeDeltaFor(nodeId: string): number {
+    const rest = this.equilib?.[nodeId] ?? 0;
+    const scale = Math.max(Math.abs(rest), Math.abs(this.initialOf(nodeId)), 1);
+    return NUDGE_FRACTION * scale;
+  }
+
   private applyHighlight(): void {
     const loop = this.activeLoopId
       ? this.derived.loops.find((l) => l.id === this.activeLoopId)
@@ -919,5 +940,10 @@ export class Layer1Renderer {
       .classed(HIGHLIGHTED_CLASS, (d) => d.id === this.activeLoopId)
       .classed(DIMMED_CLASS, (d) => this.activeLoopId !== null && d.id !== this.activeLoopId);
   }
+}
+
+/** Clamp `v` to the closed range [lo, hi]. */
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
 }
 

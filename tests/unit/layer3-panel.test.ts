@@ -18,6 +18,7 @@ const DELAY_ONLY: Weights = {
   delay_ratio: 1,
   rate_mismatch: 0,
   dominant_loop: 0,
+  sensitivity: 0,
 };
 
 function nodeSelectValue(host: HTMLElement): string {

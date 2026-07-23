@@ -64,6 +64,8 @@ export function loadSession(input: string): Session {
     delay_ratio: raw.weights?.delay_ratio ?? 1,
     rate_mismatch: raw.weights?.rate_mismatch ?? 1,
     dominant_loop: raw.weights?.dominant_loop ?? 1,
+    // Backward compatibility: older sessions predate the sensitivity signal.
+    sensitivity: raw.weights?.sensitivity ?? 1,
   };
   return { version: 1, graph, weights, savedAt: raw.savedAt ?? "" };
 }

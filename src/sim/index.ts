@@ -1,0 +1,26 @@
+export {
+  DEFAULT_ENGINE_OPTIONS,
+  createEngine,
+  equilibrium,
+  impulse,
+  initialState,
+  run,
+  setValue,
+  step,
+  tioeOf,
+  totalMass,
+  computeSlots,
+  edgeRate,
+  type Engine,
+  type EngineOptions,
+  type IntegratorMethod,
+  type SimState,
+  type TioeSnapshot,
+} from "./engine";
+export {
+  computeSensitivities,
+  normalizedSensitivities,
+  normalizeSensitivities,
+  DEFAULT_SENSITIVITY_OPTIONS,
+  type SensitivityOptions,
+} from "./sensitivity";

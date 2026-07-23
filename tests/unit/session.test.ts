@@ -17,6 +17,7 @@ const weights: Weights = {
   delay_ratio: 2,
   rate_mismatch: 0.5,
   dominant_loop: 1.5,
+  sensitivity: 1,
 };
 
 const graph: Graph = withComputedLoops({

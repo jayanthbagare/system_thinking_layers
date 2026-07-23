@@ -77,7 +77,7 @@ unfamiliar.
 | **Signal**               | A pulse that travels along an edge carrying a value change. When you nudge a node, a signal rides every outgoing arrow; when it lands, the target node's value shifts and a fresh signal rides onward. This is the live "running the network" animation — reinforcing loops amplify the pulse, balancing loops dampen it. |
 | **Nudge**                | A small push to a node's value via the ▲/▼ arrows that appear on hover. Up grows the value (positive direction); down shrinks it (negative direction). The signed change propagates to the next node and around the loop.                                                                              |
 | **Value circle**         | The filled circle inside each node. Its radius encodes the node's current value (bigger = higher); its color encodes the direction of drift (green = above rest, red = below rest). Updates live as pulses circulate.                                                                                  |
-| **Collar**               | An optional upper and/or lower bound on a node's live (normalized) value, authored in the YAML as `lower_collar` and `upper_collar` (both in [0,1]). The loopy animation clamps the node's value to stay within its collar, so a node cannot drift beyond a sane range. Omit both for no clamping (the value may drift freely). |
+| **Collar**               | An optional upper and/or lower bound on a node's value, authored in the YAML as `lower_collar` and `upper_collar`. Today these are normalised [0,1] fields that the live animation clamps; a planned migration (Phase 2) restates them in the node's own physical units and enforces them inside the simulation engine, so a collar becomes a real capacity limit that changes trajectories. Until then, collars affect only the live display. Omit both for no clamping. |
 | **Node monitor**         | A right-side panel (L1 only) that plots node values over time as sparklines. In small graphs (< 7 nodes) all nodes are shown; in larger graphs a dropdown picks one. Lets you watch oscillation and amplification unfold as the live animation runs. |
 | **Intervention**         | A hypothetical change you make to one node to see what would happen — "what if we doubled capacity here?"                                                                                                                                                                                              |
 | **Agent**                | An individual actor in the system — one warehouse, one customer, one machine. The ABM view simulates many agents individually and sees what emerges in aggregate.                                                                                                                                      |
@@ -132,7 +132,7 @@ section 5). You can start exploring immediately.
 | Command             | What it does                                                                                                                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run build`     | Creates a production build in the `dist/` folder. You can open `dist/index.html` directly in a browser, or deploy it to any static host. |
-| `npm test`          | Runs the test suite (181 automated tests). Not needed for normal use.                                                                    |
+| `npm test`          | Runs the test suite (178 automated tests). Not needed for normal use.                                                                    |
 | `npm run lint`      | Checks code quality. Only relevant if you are editing the source.                                                                        |
 | `npm run typecheck` | Checks TypeScript types. Only relevant if you are editing the source.                                                                    |
 
@@ -229,7 +229,7 @@ The monitor has two modes, chosen automatically by graph size:
 
 A **Value / Cumulative** toggle in the monitor header switches the metric:
 
-- **Value** (default): plots the node's raw loopy value (0.5 = rest). Shows
+- **Value** (default): plots the node's raw value (its operating point = rest). Shows
   the current state — oscillation, growth, decline.
 - **Cumulative**: plots the running sum of each node's deviation from rest.
   Shows the net drift direction over time — a rising line means the node has
@@ -474,15 +474,13 @@ node.
 This answers the question: **"If I could change one thing in this system,
 which node would have the biggest ripple effect?"**
 
-The score is **live-adjusted**: as the Layer 1 animation runs and nodes
-get loaded (their values drift from rest), the ranking updates to reflect
-which nodes are *actively* stressed. A node that is structurally a
-candidate but is currently at rest drops in rank; a node that is
-structurally weaker but is currently heavily loaded climbs. A small
-**load** badge on each card shows how far that node's value has drifted
-from rest, as a percentage. This keeps the structural weights in control
-— they still determine which signals matter — while the live load
-re-weights the result.
+The score is a **pure function of the graph and your weights** — it never
+changes as the animation runs, so the ranking is stable and trustworthy. A
+fifth signal, **sensitivity**, measures how much a unit nudge at each node
+perturbs the whole system (computed once from the simulation engine and cached
+until you edit the graph). The four structural signals still describe *where*
+the constraint probably sits; sensitivity tells you *how much it matters* when
+you poke it.
 
 ### What you see
 
@@ -525,14 +523,17 @@ R/B rate mismatch      1.0
 
 Dominant-loop share    1.0
 ━━━━━━●━━━━━━━━━━━━━━━
+
+Sensitivity (impulse)  1.0
+━━━━━━●━━━━━━━━━━━━━━━
 ```
 
-These four sliders control how much weight each signal carries in the
+These five sliders control how much weight each signal carries in the
 score. Drag them to test different theories about what makes a node a
 constraint. The scores recompute live (within 80 milliseconds) as you
 drag — you do not need to press a button.
 
-The four signals, in plain language:
+The five signals, in plain language:
 
 | Slider                  | What it measures                                                                                     | Why it matters                                                                                 |
 | ----------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -540,8 +541,9 @@ The four signals, in plain language:
 | **Delay / cycle time**  | The biggest delay touching this node, relative to the average loop cycle time                        | A long delay at a node causes pile-ups: stuff arrives late, and the system over-corrects.      |
 | **R/B rate mismatch**   | The gap between the average reinforcing-loop speed and the average balancing-loop speed at this node | Where a fast reinforcing loop meets a slow balancing loop, inventory or oscillation builds up. |
 | **Dominant-loop share** | Whether this node is in the loop with the longest cycle time                                         | The slowest loop often governs the system's overall response time.                             |
+| **Sensitivity (impulse)** | How much a unit nudge at this node perturbs the whole system (L2 norm of the trajectory deviation) | A node whose nudge ripples furthest is the one with the most leverage — and the most risk.    |
 
-> **Tip:** "Only the ratios matter" means that doubling all four sliders
+> **Tip:** "Only the ratios matter" means that doubling all five sliders
 > at once changes nothing. What matters is the _relative_ emphasis. Set
 > one slider to 0 to ignore that signal entirely; set it to 3 to
 > emphasize it heavily.
@@ -1281,12 +1283,17 @@ system-dynamics thinking, 50 nodes is more than enough.
 
 ### "I changed a weight slider and the ranking changed. Is that normal?"
 
-Yes. The constraint score is a weighted sum of four signals. Changing
+Yes. The constraint score is a weighted sum of five signals. Changing
 the weights changes the scores, which can reorder the ranking. This is
 the intended use: you are testing the sensitivity of the constraint
 location to your theory about what matters. If the #1 node changes when
 you shift weights, that tells you the constraint is not a fixed fact but
 depends on which signals you emphasize — a useful insight in itself.
+
+Note that the ranking no longer changes while the animation runs: the
+score is a pure function of the graph and your weights (plus the cached
+**sensitivity** signal, recomputed only when you edit the graph). What
+you see is what the structure says, not a snapshot of the animation.
 
 ### "What is the difference between Euler and RK4?"
 

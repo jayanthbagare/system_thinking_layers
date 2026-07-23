@@ -26,8 +26,20 @@
 import type { Edge, Graph, Loop, Node } from "@/model/types";
 import { deriveLoops } from "@/graph/loops";
 
-/** The four signal ids, matching the spec's w1..w4. */
-export type SignalId = "in_degree" | "delay_ratio" | "rate_mismatch" | "dominant_loop";
+/**
+ * The five signal ids. The first four are structural (pure functions of the
+ * graph); the fifth, `sensitivity`, is derived from the simulation engine
+ * (Phase 1 §1.3) and passed into `scoreGraph` pre-computed so the scorer itself
+ * stays referentially transparent. A node's sensitivity measures how much a
+ * unit impulse there perturbs the whole system — the principled, deterministic
+ * replacement for the removed live-load reweighting.
+ */
+export type SignalId =
+  | "in_degree"
+  | "delay_ratio"
+  | "rate_mismatch"
+  | "dominant_loop"
+  | "sensitivity";
 
 /** Exposed slider weights. Defaults are equal (any positive value works since
  * only ratios matter); 1 is chosen so the raw breakdown reads naturally. */
@@ -36,6 +48,7 @@ export interface Weights {
   delay_ratio: number;
   rate_mismatch: number;
   dominant_loop: number;
+  sensitivity: number;
 }
 
 export const DEFAULT_WEIGHTS: Weights = {
@@ -43,6 +56,7 @@ export const DEFAULT_WEIGHTS: Weights = {
   delay_ratio: 1,
   rate_mismatch: 1,
   dominant_loop: 1,
+  sensitivity: 1,
 };
 
 /** Per-node signal values (raw, pre-normalization) — the "why" behind a score. */
@@ -51,6 +65,7 @@ export interface SignalBreakdown {
   delay_ratio: number;
   rate_mismatch: number;
   dominant_loop: number;
+  sensitivity: number;
 }
 
 /** A scored node: the full inspectable breakdown plus the final score. */
@@ -63,13 +78,6 @@ export interface ScoredNode {
   contributions: SignalBreakdown;
   /** Raw signal values before normalization, for the detailed "why" panel. */
   raw: SignalBreakdown;
-  /**
-   * Current live load factor in [0,1] — how far the node's runtime value has
-   * drifted from rest, relative to the most-loaded node. 0 = at rest, 1 =
-   * most loaded. Omitted when no live values were supplied (structural-only
-   * scoring), so callers can detect whether the score is live-adjusted.
-   */
-  load?: number;
 }
 
 export interface ScoreResult {
@@ -80,40 +88,38 @@ export interface ScoreResult {
 }
 
 /**
- * Rest value matching the Layer 1 loopy simulation's `REST_VALUE` (0.5).
- * Duplicated locally to avoid a cross-layer dependency on `layer1/signal`.
- * A node whose live value equals this is "at rest" (no load).
- */
-const REST_VALUE = 0.5;
-
-/**
- * Compute the constraint score for every node. Pure.
+ * Compute the constraint score for every node. Pure: a referentially
+ * transparent function of `(graph, weights, sensitivities)`. Same inputs -> same
+ * output, no hidden state, no reliance on dict insertion order, no dependence
+ * on animation state.
  *
- * When `liveValues` is supplied (the current Layer 1 loopy animation state),
- * each node's structural score is multiplied by a **load factor** derived
- * from how far its runtime value has drifted from rest. A heavily loaded node
- * (large deviation) gets a bigger boost, so the ranking reflects *active*
- * bottlenecks — not just structural ones. The existing weights still control
- * which structural signals matter; load only re-weights their product. When
- * `liveValues` is omitted, the score is purely structural (the original behavior).
+ * `sensitivities` (engine-derived, normalised to [0,1] across nodes) is an
+ * explicit input rather than computed here, so the scorer never imports the
+ * engine and never observes live animation state. When omitted, the
+ * sensitivity signal is treated as zero everywhere (equivalent to a zeroed
+ * weight) — the structural four signals still rank the graph.
  */
 export function scoreGraph(
   graph: Graph,
   weights: Weights = DEFAULT_WEIGHTS,
-  liveValues?: Map<string, number>,
+  sensitivities?: Map<string, number>,
 ): ScoreResult {
   const loops = deriveLoops(graph).loops;
 
   const rawByNode = new Map<string, SignalBreakdown>();
   for (const n of graph.nodes) {
-    rawByNode.set(n.id, computeRawSignals(n, graph.edges, loops));
+    rawByNode.set(n.id, computeRawSignals(n, graph.edges, loops, sensitivities));
   }
 
   // Normalize each signal across nodes (divide-by-max).
   const norms = normalizeAcrossNodes(rawByNode);
 
   const wSum =
-    weights.in_degree + weights.delay_ratio + weights.rate_mismatch + weights.dominant_loop;
+    weights.in_degree +
+    weights.delay_ratio +
+    weights.rate_mismatch +
+    weights.dominant_loop +
+    weights.sensitivity;
   const safeW = wSum > 0 ? wSum : 1;
 
   const ranked: ScoredNode[] = graph.nodes.map((n) => {
@@ -124,52 +130,39 @@ export function scoreGraph(
       delay_ratio: (weights.delay_ratio * norm.delay_ratio) / safeW,
       rate_mismatch: (weights.rate_mismatch * norm.rate_mismatch) / safeW,
       dominant_loop: (weights.dominant_loop * norm.dominant_loop) / safeW,
+      sensitivity: (weights.sensitivity * norm.sensitivity) / safeW,
     };
     const score =
       contributions.in_degree +
       contributions.delay_ratio +
       contributions.rate_mismatch +
-      contributions.dominant_loop;
+      contributions.dominant_loop +
+      contributions.sensitivity;
     return { nodeId: n.id, label: n.label, score, contributions, raw };
   });
-
-  // When live values are supplied, multiply each structural score by a load
-  // factor (1 + normalizedDeviation). A node at rest keeps its structural
-  // score; a fully loaded node gets 2×. Then re-normalize so the top is 1.0.
-  if (liveValues) {
-    let maxDev = 0;
-    const devByNode = new Map<string, number>();
-    for (const n of graph.nodes) {
-      const v = liveValues.get(n.id) ?? REST_VALUE;
-      const dev = Math.abs(v - REST_VALUE);
-      devByNode.set(n.id, dev);
-      if (dev > maxDev) maxDev = dev;
-    }
-    for (const sn of ranked) {
-      const dev = devByNode.get(sn.nodeId) ?? 0;
-      const normDev = maxDev > 0 ? dev / maxDev : 0;
-      sn.score = sn.score * (1 + normDev);
-      sn.load = normDev;
-    }
-    // Re-normalize to [0,1] (divide by max).
-    const maxScore = ranked.reduce((m, sn) => Math.max(m, sn.score), 0);
-    if (maxScore > 0) {
-      for (const sn of ranked) sn.score /= maxScore;
-    }
-  }
 
   ranked.sort((a, b) => b.score - a.score || (a.nodeId < b.nodeId ? -1 : 1));
   return { ranked, weights };
 }
 
 /** Top-k ranked constraints. Pure projection over `scoreGraph` output. */
-export function topConstraints(graph: Graph, weights: Weights, k = 3): ScoredNode[] {
-  return scoreGraph(graph, weights).ranked.slice(0, k);
+export function topConstraints(
+  graph: Graph,
+  weights: Weights,
+  k = 3,
+  sensitivities?: Map<string, number>,
+): ScoredNode[] {
+  return scoreGraph(graph, weights, sensitivities).ranked.slice(0, k);
 }
 
 // --- per-node raw signals ------------------------------------------------
 
-function computeRawSignals(node: Node, edges: Edge[], loops: Loop[]): SignalBreakdown {
+function computeRawSignals(
+  node: Node,
+  edges: Edge[],
+  loops: Loop[],
+  sensitivities?: Map<string, number>,
+): SignalBreakdown {
   const incident = edges.filter((e) => e.source === node.id || e.target === node.id);
   const maxDelay = incident.reduce((m, e) => Math.max(m, e.delay.magnitude), 0);
 
@@ -186,12 +179,16 @@ function computeRawSignals(node: Node, edges: Edge[], loops: Loop[]): SignalBrea
 
   const rateMismatch = mismatchAtNode(memberLoops);
   const dominantLoop = dominantLoopShare(memberLoops, loops);
+  // Sensitivity is engine-derived and passed in (normalised [0,1]). Zero when
+  // not supplied (structural-only scoring) so the signal is inert.
+  const sensitivity = sensitivities?.get(node.id) ?? 0;
 
   return {
     in_degree: inDegree,
     delay_ratio: delayRatio,
     rate_mismatch: rateMismatch,
     dominant_loop: dominantLoop,
+    sensitivity,
   };
 }
 
@@ -200,8 +197,7 @@ function computeRawSignals(node: Node, edges: Edge[], loops: Loop[]): SignalBrea
  * (spec: "Fast reinforcing loop feeding a slow balancing loop is where inventory
  * or oscillation builds"). Measured as the gap between the average reinforcing
  * loop cycle time and the average balancing loop cycle time among loops the
- * node belongs to, normalized by the global max loop cycle time so it's
- * comparable across graphs. Zero if the node sits in only one polarity class.
+ * node belongs to. Zero if the node sits in only one polarity class.
  */
 function mismatchAtNode(memberLoops: Loop[]): number {
   const reinforcing = memberLoops.filter((l) => l.sign === "reinforcing");
@@ -239,12 +235,14 @@ function normalizeAcrossNodes(
     delay_ratio: 0,
     rate_mismatch: 0,
     dominant_loop: 0,
+    sensitivity: 0,
   };
   for (const s of raw.values()) {
     max.in_degree = Math.max(max.in_degree, s.in_degree);
     max.delay_ratio = Math.max(max.delay_ratio, s.delay_ratio);
     max.rate_mismatch = Math.max(max.rate_mismatch, s.rate_mismatch);
     max.dominant_loop = Math.max(max.dominant_loop, s.dominant_loop);
+    max.sensitivity = Math.max(max.sensitivity, s.sensitivity);
   }
 
   const out = new Map<string, SignalBreakdown>();
@@ -254,6 +252,7 @@ function normalizeAcrossNodes(
       delay_ratio: max.delay_ratio > 0 ? s.delay_ratio / max.delay_ratio : 0,
       rate_mismatch: max.rate_mismatch > 0 ? s.rate_mismatch / max.rate_mismatch : 0,
       dominant_loop: max.dominant_loop > 0 ? s.dominant_loop / max.dominant_loop : 0,
+      sensitivity: max.sensitivity > 0 ? s.sensitivity / max.sensitivity : 0,
     });
   }
   return out;

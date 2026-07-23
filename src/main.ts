@@ -67,6 +67,7 @@ function main(): void {
     delay_ratio: 1,
     rate_mismatch: 1,
     dominant_loop: 1,
+    sensitivity: 1,
   };
 
   // --- Live node monitor host (Layer 1 view; renderer owns its content) --
@@ -89,14 +90,10 @@ function main(): void {
     onNudge: (nodeId: string, direction: number) => {
       // Drive the Layer 3 intervention from the canvas nudge so the
       // sparklines re-simulate from what the user is poking at; the L3
-      // delta's sign follows the nudge direction (up = +, down = −).
+      // delta's sign follows the nudge direction (up = +, down = −). The L1
+      // nudge and the L3 Δ both call the same engine impulse (Phase 1), so a
+      // canvas nudge and an equivalent L3 Δ produce the same trajectory.
       l3.applyNudge(nodeId, direction);
-    },
-    onLiveValues: (values: Map<string, number>) => {
-      // Feed live node values to Layer 2 so its constraint scores are
-      // load-adjusted as the animation runs — the ranking reflects *active*
-      // bottlenecks, not just structural ones.
-      l2.setLiveValues(values);
     },
     onEditNode: (nodeId: string, patch: NodeEditPatch) => {
       // Apply the validated edit to the in-memory Graph (single source of
@@ -107,6 +104,9 @@ function main(): void {
       const updated = applyPatch(graph.nodes[idx], patch);
       graph.nodes[idx] = updated;
       renderer.render(graph);
+      // A graph edit invalidates the cached sensitivities (the engine's
+      // dynamics changed), then re-scores with the new structure.
+      l2.invalidate();
       l2.setWeights(weights);
       l3.setWeights(weights);
       downloadGraphYaml(graph);

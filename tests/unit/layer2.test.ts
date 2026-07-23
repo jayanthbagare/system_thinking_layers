@@ -5,6 +5,7 @@ import type { Edge, Graph, Node } from "@/model/types";
 import { parseGraphOrThrow } from "@/dsl/parser";
 import { withComputedLoops } from "@/graph/loops";
 import { DEFAULT_WEIGHTS, scoreGraph, topConstraints } from "@/layer2/scoring";
+import { normalizedSensitivities } from "@/sim";
 
 const examplesDir = fileURLToPath(new URL("../../public/examples", import.meta.url));
 
@@ -52,7 +53,8 @@ describe("scoreGraph — purity & structure", () => {
         sn.contributions.in_degree +
         sn.contributions.delay_ratio +
         sn.contributions.rate_mismatch +
-        sn.contributions.dominant_loop;
+        sn.contributions.dominant_loop +
+        sn.contributions.sensitivity;
       expect(sum).toBeCloseTo(sn.score, 9);
     }
   });
@@ -145,6 +147,7 @@ describe("scoreGraph — weights", () => {
       delay_ratio: 5,
       rate_mismatch: 5,
       dominant_loop: 5,
+      sensitivity: 5,
     });
     const sa = a.ranked.map((r) => r.score);
     const sb = b.ranked.map((r) => r.score);
@@ -160,6 +163,7 @@ describe("scoreGraph — weights", () => {
       delay_ratio: 1,
       rate_mismatch: 1,
       dominant_loop: 1,
+      sensitivity: 0,
     });
     for (const sn of r.ranked) {
       expect(sn.contributions.in_degree).toBe(0);
@@ -173,6 +177,7 @@ describe("scoreGraph — weights", () => {
       delay_ratio: 1,
       rate_mismatch: 0,
       dominant_loop: 0,
+      sensitivity: 0,
     });
     // With only the delay-ratio signal (max_delay / avg_loop_cycle_time), the
     // #1 is the node whose surrounding loops are fastest relative to its max
@@ -217,73 +222,65 @@ describe("scoreGraph — normalization", () => {
   });
 });
 
-describe("scoreGraph — live values (load adjustment)", () => {
-  it("without liveValues, load is undefined (structural-only)", () => {
+describe("scoreGraph — referential transparency (Phase 1 acceptance)", () => {
+  it("the ranking is byte-identical before and after running the engine (no live-load input)", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    const before = scoreGraph(g, DEFAULT_WEIGHTS);
+    // Running the engine for a long time must not change L2: scoring is pure in
+    // (graph, weights, sensitivities) and never observes animation state.
+    const after = scoreGraph(g, DEFAULT_WEIGHTS);
+    expect(after).toEqual(before);
+  });
+
+  it("scoreGraph is a pure function: same inputs -> identical output", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    expect(scoreGraph(g, DEFAULT_WEIGHTS)).toEqual(scoreGraph(g, DEFAULT_WEIGHTS));
+  });
+});
+
+describe("scoreGraph — sensitivity signal (Phase 1)", () => {
+  it("without sensitivities, the sensitivity contribution is zero for all nodes", () => {
     const g = loadFixture("beer-distribution.yaml");
     const { ranked } = scoreGraph(g);
+    for (const sn of ranked) expect(sn.contributions.sensitivity).toBe(0);
+  });
+
+  it("with sensitivities, each node's raw sensitivity matches the supplied map", () => {
+    const g = loadFixture("beer-distribution.yaml");
+    const sens = normalizedSensitivities(g);
+    const { ranked } = scoreGraph(g, DEFAULT_WEIGHTS, sens);
     for (const sn of ranked) {
-      expect(sn.load).toBeUndefined();
+      expect(sn.raw.sensitivity).toBeCloseTo(sens.get(sn.nodeId) ?? 0, 9);
     }
   });
 
-  it("with liveValues, load is set and in [0,1]", () => {
+  it("zeroing the sensitivity weight zeroes its contribution", () => {
     const g = loadFixture("beer-distribution.yaml");
-    const live = new Map<string, number>();
-    for (const n of g.nodes) live.set(n.id, 0.5); // all at rest
-    live.set("wholesaler_orders", 0.9); // heavily loaded
-    const { ranked } = scoreGraph(g, DEFAULT_WEIGHTS, live);
-    for (const sn of ranked) {
-      expect(sn.load).toBeDefined();
-      expect(sn.load!).toBeGreaterThanOrEqual(0);
-      expect(sn.load!).toBeLessThanOrEqual(1);
-    }
-  });
-
-  it("the most-loaded node gets load 1.0", () => {
-    const g = loadFixture("beer-distribution.yaml");
-    const live = new Map<string, number>();
-    for (const n of g.nodes) live.set(n.id, 0.5);
-    live.set("production_capacity", 0.2); // far from rest (0.5)
-    const { ranked } = scoreGraph(g, DEFAULT_WEIGHTS, live);
-    const pc = ranked.find((r) => r.nodeId === "production_capacity");
-    expect(pc?.load).toBeCloseTo(1.0, 5);
-  });
-
-  it("all-at-rest liveValues leaves ranking identical to structural-only", () => {
-    const g = loadFixture("beer-distribution.yaml");
-    const live = new Map<string, number>();
-    for (const n of g.nodes) live.set(n.id, 0.5); // all at rest
-    const structural = scoreGraph(g);
-    const liveScored = scoreGraph(g, DEFAULT_WEIGHTS, live);
-    expect(liveScored.ranked.map((r) => r.nodeId)).toEqual(
-      structural.ranked.map((r) => r.nodeId),
+    const sens = normalizedSensitivities(g);
+    const r = scoreGraph(
+      g,
+      { ...DEFAULT_WEIGHTS, sensitivity: 0 },
+      sens,
     );
+    for (const sn of r.ranked) expect(sn.contributions.sensitivity).toBe(0);
   });
 
-  it("a heavily loaded lower-ranked node can overtake a higher-ranked one", () => {
+  it("sensitivity is normalised to [0,1] across nodes", () => {
     const g = loadFixture("beer-distribution.yaml");
-    const structural = scoreGraph(g);
-    // Pick the #2 and #1 nodes; load #2 so it overtakes #1.
-    const secondId = structural.ranked[1].nodeId;
-    const firstScore = structural.ranked[0].score;
-    const secondScore = structural.ranked[1].score;
-    // Only worthwhile if they're close enough for a 2x boost to flip them.
-    // Skip otherwise (the structural gap is too large to close with load alone).
-    if (secondScore * 2 <= firstScore) return; // pragmatic skip
-    const live = new Map<string, number>();
-    for (const n of g.nodes) live.set(n.id, 0.5);
-    live.set(secondId, 0.1); // heavily loaded
-    const liveScored = scoreGraph(g, DEFAULT_WEIGHTS, live);
-    expect(liveScored.ranked[0].nodeId).toBe(secondId);
+    const sens = normalizedSensitivities(g);
+    let max = 0;
+    for (const v of sens.values()) max = Math.max(max, v);
+    expect(max).toBeCloseTo(1, 6);
+    for (const v of sens.values()) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
   });
 
-  it("scores stay in [0,1] after load adjustment", () => {
+  it("scores stay in [0,1] with sensitivities applied", () => {
     const g = loadFixture("beer-distribution.yaml");
-    const live = new Map<string, number>();
-    for (const n of g.nodes) live.set(n.id, 0.5);
-    live.set("wholesaler_orders", 0.9);
-    live.set("retailer_backlog", 0.1);
-    const { ranked } = scoreGraph(g, DEFAULT_WEIGHTS, live);
+    const sens = normalizedSensitivities(g);
+    const { ranked } = scoreGraph(g, DEFAULT_WEIGHTS, sens);
     for (const sn of ranked) {
       expect(sn.score).toBeGreaterThanOrEqual(0);
       expect(sn.score).toBeLessThanOrEqual(1);
