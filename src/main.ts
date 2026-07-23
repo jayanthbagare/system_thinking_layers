@@ -58,11 +58,11 @@ function main(): void {
       void _drop;
       graph.nodes[idx] = pin ? { ...rest, pin } : rest;
     },
-    onCycle: (nodeId: string, size: number) => {
-      // Drive the Layer 3 intervention from the canvas size-cycle so the
-      // sparklines follow what the user is poking at; the L3 delta slider
-      // is set proportional to the chosen inner-circle size.
-      l3.applyCycle(nodeId, size);
+    onNudge: (nodeId: string, direction: number) => {
+      // Drive the Layer 3 intervention from the canvas nudge so the
+      // sparklines re-simulate from what the user is poking at; the L3
+      // delta's sign follows the nudge direction (up = +, down = −).
+      l3.applyNudge(nodeId, direction);
     },
   });
   renderer.render(graph);
@@ -181,7 +181,7 @@ function main(): void {
   resetBtn.addEventListener("click", () => renderer.resetLoopy());
   const hint = document.createElement("span");
   hint.className = "play-hint";
-  hint.textContent = "Click a node to nudge it";
+  hint.textContent = "Hover a node, click ▲/▼ to nudge it";
   playBar.append(playBtn, resetBtn, hint);
   root.append(playBar);
 

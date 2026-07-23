@@ -73,8 +73,12 @@ body {
 }
 .edge-delay-badge {
   font-size: 10px;
+  font-weight: 700;
   fill: var(--c-delay);
+  text-anchor: middle;
+  dominant-baseline: central;
   user-select: none;
+  pointer-events: none;
 }
 
 /* Nodes */
@@ -100,6 +104,42 @@ body {
 }
 .node {
   cursor: pointer;
+}
+
+/* Loopy-style up/down nudge arrows — revealed on hover. Clicking up nudges
+   the node's value up (positive growth direction), down nudges it down; the
+   signed signal propagates to the next node along each outgoing edge. */
+.node-nudge-arrow {
+  fill: var(--c-bg);
+  stroke: var(--c-node-stroke);
+  stroke-width: 1.5;
+  opacity: 0;
+  pointer-events: all;
+  cursor: pointer;
+  transition: opacity 120ms ease-out;
+}
+.node-nudge-arrow-text {
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--c-text);
+  text-anchor: middle;
+  dominant-baseline: central;
+  user-select: none;
+  pointer-events: all;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.node:hover .node-nudge-arrow,
+.node:hover .node-nudge-arrow-text {
+  opacity: 1;
+}
+.node-nudge-arrow:hover {
+  fill: var(--c-delay);
+  stroke: var(--c-delay);
+}
+.node-nudge-arrow-text:hover {
+  fill: var(--c-bg);
 }
 
 /* Traveling signal pulses (loopy-style propagation). */

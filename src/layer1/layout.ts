@@ -100,7 +100,9 @@ export function delayHashMarks(geom: EdgeGeometry): [Point, Point] {
   const { midpoint, direction } = geom;
   // Perpendicular vector (rotated +90 degrees).
   const perp = { x: -direction.y, y: direction.x };
-  const offset = 6; // distance of the hash midpoint from the edge midpoint
+  // Past the polarity badge (radius POLARITY_BADGE_R) so the hashes don't
+  // sit under the +/− chip at the midpoint.
+  const offset = 14; // distance of the hash midpoint from the edge midpoint
   const halfLen = 6; // half-length of each hash stroke
   const cx = midpoint.x + direction.x * offset;
   const cy = midpoint.y + direction.y * offset;
@@ -111,6 +113,18 @@ export function delayHashMarks(geom: EdgeGeometry): [Point, Point] {
 }
 
 /**
+ * Position for the delay magnitude badge. Placed perpendicular to the edge,
+ * offset to the side of the midpoint so it clears the polarity chip (which
+ * sits on the midpoint) and the double-hash marks (which sit along the edge
+ * past the midpoint). Pure and deterministic.
+ */
+export function delayBadgePosition(geom: EdgeGeometry, offset = 16): Point {
+  const { midpoint, direction } = geom;
+  const perp = { x: -direction.y, y: direction.x };
+  return { x: midpoint.x + perp.x * offset, y: midpoint.y + perp.y * offset };
+}
+
+/**
  * The second hash mark sits a few pixels further along the edge than the first
  * so the pair reads as a deliberate double-hash, not a single tick.
  */
@@ -118,7 +132,8 @@ export function delayHashMarksDouble(geom: EdgeGeometry): [Point, Point, Point, 
   const [a1, a2] = delayHashMarks(geom);
   const { midpoint, direction } = geom;
   const perp = { x: -direction.y, y: direction.x };
-  const offset = 16;
+  // Second hash sits further along, clear of the first (and the polarity chip).
+  const offset = 24;
   const halfLen = 6;
   const cx = midpoint.x + direction.x * offset;
   const cy = midpoint.y + direction.y * offset;

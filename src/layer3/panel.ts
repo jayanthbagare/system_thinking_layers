@@ -23,8 +23,6 @@ const POST_COLOR = "#1976d2";
 const STEPS_DEFAULT = 200;
 const DT_DEFAULT = 0.1;
 const DELTA_DEFAULT = 50;
-/** Delta slider bounds (matches the `slider("delta", ..., -200, 200, ...)` call). */
-const DELTA_MAX = 200;
 
 const TIOE_META: { key: "T" | "I" | "OE"; label: string; description: string }[] = [
   { key: "T", label: "Throughput", description: "Sum of nodes tagged T" },
@@ -103,42 +101,20 @@ export class Layer3Panel {
   }
 
   /**
-   * React to a loopy-style nudge on the canvas (top half +, bottom half −).
-   * Selects the nudged node as the intervention node (locking out L2
+   * React to a loopy-style up/down-arrow nudge on the canvas (up = +, down
+   * = −). Selects the nudged node as the intervention node (locking out L2
    * auto-follow, like an explicit dropdown pick) and sets the intervention
-   * delta's sign from the nudge direction — keeping the current magnitude — so
-   * the sparklines re-derive a fresh post trajectory. This is the bridge
-   * between the Layer 1 animation and the Layer 3 quantitative view; it touches
-   * only view parameters (node + delta), never parallel state, so `simulate`
-   * still reads solely from `Graph`.
+   * delta's sign from the nudge direction — keeping the current magnitude —
+   * so the sparklines re-derive a fresh post trajectory. This is the bridge
+   * between the Layer 1 animation and the Layer 3 quantitative view; it
+   * touches only view parameters (node + delta), never parallel state, so
+   * `simulate` still reads solely from `Graph`.
    */
   applyNudge(nodeId: string, direction: number): void {
     this.nodeId = nodeId;
     this.userSelectedNode = true;
     const mag = Math.abs(this.delta);
     this.delta = direction >= 0 ? mag : -mag;
-    this.syncNodeSelect();
-    this.syncDeltaSlider();
-    this.renderTrajectory();
-  }
-
-  /**
-   * React to a loopy-style size-cycle click on the canvas. Selects the cycled
-   * node as the intervention node (locking out L2 auto-follow, like an
-   * explicit dropdown pick) and sets the intervention delta's magnitude
-   * proportional to the new inner-circle size — keeping the current sign —
-   * so the sparklines re-derive a fresh post trajectory. `size` is the
-   * normalized loopy value in [0,1] the node was cycled to. This is the
-   * bridge between the Layer 1 animation and the Layer 3 quantitative view;
-   * it touches only view parameters (node + delta), never parallel state, so
-   * `simulate` still reads solely from `Graph`.
-   */
-  applyCycle(nodeId: string, size: number): void {
-    this.nodeId = nodeId;
-    this.userSelectedNode = true;
-    const sign = this.delta < 0 ? -1 : 1;
-    const magnitude = Math.round(Math.abs(size) * DELTA_MAX);
-    this.delta = sign * magnitude;
     this.syncNodeSelect();
     this.syncDeltaSlider();
     this.renderTrajectory();

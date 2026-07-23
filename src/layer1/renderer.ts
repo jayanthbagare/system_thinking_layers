@@ -27,6 +27,7 @@ import { deriveLoops, type DerivedLoops } from "@/graph/loops";
 import {
   arrowHead,
   delayBadge,
+  delayBadgePosition,
   delayHashMarksDouble,
   edgeGeometry,
   hasDelay,
@@ -40,23 +41,13 @@ import {
   type Point,
 } from "./layout";
 import {
-  REST_VALUE,
+  NUDGE_DELTA,
   initialLoopyState,
   nudge as nudgeState,
   step as stepLoopy,
   type LoopyState,
   type Signal,
 } from "./signal";
-
-/**
- * Discrete loopy node values the inner "value" circle cycles through on click
- * (small → medium → large → ... → small). Each click advances to the next
- * step; the radius is derived from the value via `valueRadiusFraction`, so
- * these steps map to a fixed set of inner-circle sizes. Kept in [0,1] so the
- * linear portion of the fraction mapping applies (0.1 → 0.18r ... 0.9 →
- * 0.82r), giving evenly-spaced visual sizes.
- */
-const NODE_VALUE_STEPS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
 
 /** A node as consumed by the simulation — model node + transient layout state. */
 export interface SimNode {
@@ -83,6 +74,7 @@ export interface SimEdge {
 const NODE_RADIUS = 22;
 const ARROW_SIZE = 12; // chevron wing length (px) — loopy-style prominent head
 const POLARITY_BADGE_R = 11; // radius of the polarity badge at edge midpoint
+const NUDGE_ARROW_OFFSET = 12; // distance of the up/down nudge arrows from the node center
 const SIGNAL_SPEED = 0.035; // fraction of edge per animation frame (loopy-like)
 const HIGHLIGHTED_CLASS = "is-highlighted";
 const DIMMED_CLASS = "is-dimmed";
@@ -95,16 +87,18 @@ export interface RendererOptions {
   /** Persist a manual pin onto the Graph's node. */
   onPin?: (nodeId: string, pin: Point | null) => void;
   /**
-   * A node was clicked (loopy-style play). The click advances the node's
-   * inner value circle to the next discrete size in `NODE_VALUE_STEPS`,
-   * emitting a signal onto its outgoing edges carrying the resulting delta.
-   * `size` is the new normalized value (one of `NODE_VALUE_STEPS`); used to
-   * drive the Layer 3 intervention node / delta magnitude so the sparklines
-   * respond to canvas interaction. The loopy animation itself is view-only and
-   * never writes to `Graph` (per src/layer1/signal.ts); this callback is the
-   * only outward channel.
+   * A node's loopy-style up/down nudge arrow was clicked (loopy-style play).
+   * The up arrow nudges the node's value up by `NUDGE_DELTA` (growth in the
+   * positive direction); the down arrow nudges it down by `NUDGE_DELTA`
+   * (growth in the negative direction). Either emits a signed signal onto the
+   * node's outgoing edges carrying that delta, so the direction of growth
+   * propagates to the next node and onward around the loop. `direction` is
+   * +1 for up, -1 for down; used to drive the Layer 3 intervention sign so
+   * the sparklines re-simulate from the canvas nudge. The loopy animation
+   * itself is view-only and never writes to `Graph` (per src/layer1/signal.ts);
+   * this callback is the only outward channel.
    */
-  onCycle?: (nodeId: string, size: number) => void;
+  onNudge?: (nodeId: string, direction: number) => void;
 }
 
 export class Layer1Renderer {
@@ -443,9 +437,10 @@ export class Layer1Renderer {
         .attr("y1", b1.y)
         .attr("x2", b2.x)
         .attr("y2", b2.y);
+      const bp = delayBadgePosition(geom);
       badge
-        .attr("x", geom.midpoint.x + 8)
-        .attr("y", geom.midpoint.y + 12)
+        .attr("x", bp.x)
+        .attr("y", bp.y)
         .text(delayBadge({ delay: { type: d.delayType as Edge["delay"]["type"], magnitude: d.delayMagnitude } } as Edge));
     } else {
       badge.text("");
@@ -468,6 +463,38 @@ export class Layer1Renderer {
     enter.append("circle").attr("class", "node-circle").attr("r", NODE_RADIUS);
     enter.append("circle").attr("class", "node-value-circle").attr("r", NODE_RADIUS * 0.5);
     enter.append("text").attr("class", "node-label");
+
+    // Loopy-style up/down nudge arrows, revealed on hover. Clicking one
+    // nudges the node's value (and emits a signed signal onto its outgoing
+    // edges) so the direction of growth is up or down from this node.
+    const upY = -(NODE_RADIUS + NUDGE_ARROW_OFFSET);
+    const downY = NODE_RADIUS + NUDGE_ARROW_OFFSET;
+    enter
+      .append("circle")
+      .attr("class", "node-nudge-arrow node-nudge-arrow-up")
+      .attr("r", 9)
+      .attr("cy", upY)
+      .attr("data-dir", "1");
+    enter
+      .append("text")
+      .attr("class", "node-nudge-arrow-text node-nudge-arrow-up-text")
+      .attr("x", 0)
+      .attr("y", upY)
+      .attr("data-dir", "1")
+      .text("\u25B2");
+    enter
+      .append("circle")
+      .attr("class", "node-nudge-arrow node-nudge-arrow-down")
+      .attr("r", 9)
+      .attr("cy", downY)
+      .attr("data-dir", "-1");
+    enter
+      .append("text")
+      .attr("class", "node-nudge-arrow-text node-nudge-arrow-down-text")
+      .attr("x", 0)
+      .attr("y", downY)
+      .attr("data-dir", "-1")
+      .text("\u25BC");
 
     const merged = enter.merge(sel);
     merged.attr("transform", (d) => `translate(${d.x},${d.y})`);
@@ -560,23 +587,37 @@ export class Layer1Renderer {
         const loopId = loops.length > 0 ? loops[0].id : null;
         this.highlightLoop(loopId);
       })
-      .on("mouseleave", () => this.highlightLoop(null))
-      // Loopy-style play: a click anywhere on the node advances its inner
-      // value circle to the next discrete size in NODE_VALUE_STEPS (cycling
-      // small → ... → large → small), emitting a signal carrying the resulting
-      // delta onto the node's outgoing edges. Click position is ignored —
-      // every click steps forward through the same fixed set of sizes.
-      .on("click", (event, d) => {
-        if (!this.graph || !this.loopy) return;
-        const current = this.loopy.values.get(d.id) ?? REST_VALUE;
-        const idx = nearestStepIndex(current, NODE_VALUE_STEPS);
-        const next = NODE_VALUE_STEPS[(idx + 1) % NODE_VALUE_STEPS.length];
-        const delta = next - current;
-        this.loopy = nudgeState(this.loopy, this.graph, d.id, delta);
-        this.styleNodeValues();
-        this.drawSignals();
-        this.opts.onCycle?.(d.id, next);
-        event.stopPropagation();
+      .on("mouseleave", () => this.highlightLoop(null));
+
+    // Loopy-style play: the up/down arrows revealed on hover nudge the node's
+    // value up/down by NUDGE_DELTA. A nudge emits a signed signal onto every
+    // outgoing edge — the delta's sign sets the direction of growth from this
+    // node to the next, and that sign keeps circulating around the loop.
+    const nudgeNode = (nodeId: string, dir: number, event: MouseEvent): void => {
+      if (!this.graph || !this.loopy) return;
+      this.loopy = nudgeState(this.loopy, this.graph, nodeId, dir * NUDGE_DELTA);
+      this.styleNodeValues();
+      this.drawSignals();
+      this.opts.onNudge?.(nodeId, dir);
+      event.stopPropagation();
+    };
+    // Stop the node's drag from starting when the user presses on an arrow;
+    // d3-drag listens for pointerdown on the parent <g>, which would otherwise
+    // swallow the arrow press.
+    const swallowDrag = (event: Event): void => event.stopPropagation();
+    this.nodeLayer
+      .selectAll<SVGGElement, SimNode>(".node-nudge-arrow-up, .node-nudge-arrow-up-text")
+      .on("pointerdown", swallowDrag)
+      .on("mousedown", swallowDrag)
+      .on("click", function (event, d) {
+        nudgeNode(d.id, 1, event as MouseEvent);
+      });
+    this.nodeLayer
+      .selectAll<SVGGElement, SimNode>(".node-nudge-arrow-down, .node-nudge-arrow-down-text")
+      .on("pointerdown", swallowDrag)
+      .on("mousedown", swallowDrag)
+      .on("click", function (event, d) {
+        nudgeNode(d.id, -1, event as MouseEvent);
       });
 
     this.labelLayer
@@ -609,20 +650,3 @@ export class Layer1Renderer {
   }
 }
 
-/**
- * Index of the step in `steps` closest to `value`. Values may drift off-step
- * between clicks (signal propagation perturbs them), so the click cycles from
- * the nearest step — guaranteeing a deterministic next step regardless of drift.
- */
-function nearestStepIndex(value: number, steps: readonly number[]): number {
-  let best = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < steps.length; i++) {
-    const dist = Math.abs(steps[i] - value);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = i;
-    }
-  }
-  return best;
-}

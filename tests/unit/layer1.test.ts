@@ -78,10 +78,10 @@ describe("delayHashMarks", () => {
   it("places two perpendicular hash points past the midpoint", () => {
     const g = edgeGeometry({ x: 0, y: 0 }, { x: 100, y: 0 });
     const [a, b] = delayHashMarks(g);
-    // midpoint x = 50, plus offset 6 -> cx = 56. perp of (1,0) is (0,1).
-    expect(a.x).toBeCloseTo(56);
+    // midpoint x = 50, plus offset 14 -> cx = 64. perp of (1,0) is (0,1).
+    expect(a.x).toBeCloseTo(64);
     expect(a.y).toBeCloseTo(6);
-    expect(b.x).toBeCloseTo(56);
+    expect(b.x).toBeCloseTo(64);
     expect(b.y).toBeCloseTo(-6);
   });
 
