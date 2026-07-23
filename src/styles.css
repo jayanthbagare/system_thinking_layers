@@ -709,9 +709,6 @@ input[type="range"]:focus-visible {
   display: none;
 }
 .node-monitor-host.is-active {
-  display: block;
-}
-.node-monitor {
   display: flex;
   flex-direction: column;
   gap: 6px;
