@@ -18,7 +18,7 @@
  *   - hover/select highlight that isolates a single loop's edges/nodes.
  */
 
-import { select, pointer, type Selection } from "d3-selection";
+import { select, type Selection } from "d3-selection";
 import { forceSimulation, forceLink, forceManyBody, forceCenter, type Simulation } from "d3-force";
 import { drag } from "d3-drag";
 import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
@@ -40,13 +40,23 @@ import {
   type Point,
 } from "./layout";
 import {
-  NUDGE_DELTA,
+  REST_VALUE,
   initialLoopyState,
   nudge as nudgeState,
   step as stepLoopy,
   type LoopyState,
   type Signal,
 } from "./signal";
+
+/**
+ * Discrete loopy node values the inner "value" circle cycles through on click
+ * (small → medium → large → ... → small). Each click advances to the next
+ * step; the radius is derived from the value via `valueRadiusFraction`, so
+ * these steps map to a fixed set of inner-circle sizes. Kept in [0,1] so the
+ * linear portion of the fraction mapping applies (0.1 → 0.18r ... 0.9 →
+ * 0.82r), giving evenly-spaced visual sizes.
+ */
+const NODE_VALUE_STEPS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
 
 /** A node as consumed by the simulation — model node + transient layout state. */
 export interface SimNode {
@@ -85,13 +95,16 @@ export interface RendererOptions {
   /** Persist a manual pin onto the Graph's node. */
   onPin?: (nodeId: string, pin: Point | null) => void;
   /**
-   * A node was nudged (loopy-style click: top half +, bottom half −). The
-   * `direction` is +1 or −1. Used to drive the Layer 3 intervention node /
-   * delta sign so the sparklines respond to canvas interaction. The loopy
-   * animation itself is view-only and never writes to `Graph` (per
-   * src/layer1/signal.ts); this callback is the only outward channel.
+   * A node was clicked (loopy-style play). The click advances the node's
+   * inner value circle to the next discrete size in `NODE_VALUE_STEPS`,
+   * emitting a signal onto its outgoing edges carrying the resulting delta.
+   * `size` is the new normalized value (one of `NODE_VALUE_STEPS`); used to
+   * drive the Layer 3 intervention node / delta magnitude so the sparklines
+   * respond to canvas interaction. The loopy animation itself is view-only and
+   * never writes to `Graph` (per src/layer1/signal.ts); this callback is the
+   * only outward channel.
    */
-  onNudge?: (nodeId: string, direction: number) => void;
+  onCycle?: (nodeId: string, size: number) => void;
 }
 
 export class Layer1Renderer {
@@ -548,18 +561,21 @@ export class Layer1Renderer {
         this.highlightLoop(loopId);
       })
       .on("mouseleave", () => this.highlightLoop(null))
-      // Loopy-style play: click nudges the node's value (top half +, bottom
-      // half −) and emits a signal onto its outgoing edges.
+      // Loopy-style play: a click anywhere on the node advances its inner
+      // value circle to the next discrete size in NODE_VALUE_STEPS (cycling
+      // small → ... → large → small), emitting a signal carrying the resulting
+      // delta onto the node's outgoing edges. Click position is ignored —
+      // every click steps forward through the same fixed set of sizes.
       .on("click", (event, d) => {
         if (!this.graph || !this.loopy) return;
-        const nodeEl = event.currentTarget as SVGGElement;
-        const [, ly] = pointer(event, nodeEl);
-        // (0,0) is the node center in the group's local space.
-        const direction = ly < 0 ? 1 : -1;
-        this.loopy = nudgeState(this.loopy, this.graph, d.id, direction * NUDGE_DELTA);
+        const current = this.loopy.values.get(d.id) ?? REST_VALUE;
+        const idx = nearestStepIndex(current, NODE_VALUE_STEPS);
+        const next = NODE_VALUE_STEPS[(idx + 1) % NODE_VALUE_STEPS.length];
+        const delta = next - current;
+        this.loopy = nudgeState(this.loopy, this.graph, d.id, delta);
         this.styleNodeValues();
         this.drawSignals();
-        this.opts.onNudge?.(d.id, direction);
+        this.opts.onCycle?.(d.id, next);
         event.stopPropagation();
       });
 
@@ -591,4 +607,22 @@ export class Layer1Renderer {
       .classed(HIGHLIGHTED_CLASS, (d) => d.id === this.activeLoopId)
       .classed(DIMMED_CLASS, (d) => this.activeLoopId !== null && d.id !== this.activeLoopId);
   }
+}
+
+/**
+ * Index of the step in `steps` closest to `value`. Values may drift off-step
+ * between clicks (signal propagation perturbs them), so the click cycles from
+ * the nearest step — guaranteeing a deterministic next step regardless of drift.
+ */
+function nearestStepIndex(value: number, steps: readonly number[]): number {
+  let best = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < steps.length; i++) {
+    const dist = Math.abs(steps[i] - value);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i;
+    }
+  }
+  return best;
 }
