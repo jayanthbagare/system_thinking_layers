@@ -792,7 +792,7 @@ body {
   margin-right: 4px;
 }
 .layer3-reason {
-  grid-area: input;
+  grid-column: 1 / -1;
   margin: 2px 0 0;
   color: #b00020;
   font-size: 11px;
