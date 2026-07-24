@@ -258,3 +258,42 @@ Verdicts (spec §8.2):
 The same treatment applies to intervention ranking: if two interventions are
 within noise on ΔT/ΔOE, the report says so rather than presenting a spurious
 ordering.
+
+## Scenario tray and decision-record export (Phase 9)
+
+Exploration turns into a deliverable. "Pin scenario" captures the current typed
+intervention (type, target, magnitude, or structural diff) as a card with its
+full metric set, so options are comparable side by side on the same axes: ΔT,
+ΔI, ΔOE, ΔT/ΔOE, ΔT/ΔI, ΔDoF, leverage tier, J-curve depth, constraint-after
+(predicted and observed), and robustness verdict.
+
+The tray (`src/scenario/scenario.ts`) is an ordered list of `ScenarioCard`s
+plus a chosen id. All functions are pure: a card is a referentially
+transparent projection over `(graph, intervention, settings, weights,
+sensitivities)` — `pinScenario` runs the pre/post simulation, derives the
+Phase-4 metrics, computes the constraint-after on the post-intervention graph,
+and (optionally, seeded) a robustness verdict. Pinning never mutates the
+working `Graph`.
+
+The tray persists in the session JSON (spec §9.3). Loading restores the cards;
+loops are still re-derived on load, never trusted from file. Older sessions
+without a tray load as an empty tray.
+
+**ADR-shaped Markdown export** (`exportDecisionRecord` in
+`src/scenario/export.ts`): self-contained Markdown that renders on GitHub and
+pastes into Confluence. Six sections:
+
+1. **Context** — graph as inline Mermaid (`graphToMermaid`) plus node/edge
+   tables including declared collars in physical units.
+2. **Constraint identified** — predicted and observed, per-signal breakdown,
+   robustness verdict (opt-in via `robustnessN`).
+3. **Options considered** — one section per pinned scenario, full metric set,
+   leverage tier, plus a comparison table.
+4. **Decision** — the chosen scenario, marked by the user.
+5. **Consequences** — constraint migration trail with cycle detection, DoF
+   change, J-curve depth and duration, payback horizon.
+6. **Provenance** — model YAML, engine settings (dt, integrator, steps),
+   seed, timestamp, tool version.
+
+Pure: same inputs → identical output (the timestamp is a caller-supplied
+input, not a hidden side effect).

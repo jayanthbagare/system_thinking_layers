@@ -38,7 +38,7 @@ Other useful commands:
 npm run typecheck   # tsc --noEmit (strict mode)
 npm run lint        # eslint
 npm test            # vitest — 134 unit tests
-npm run build       # production build → dist/ (~49 KB gzipped + 2 KB worker)
+npm run build       # production build → dist/ (~70 KB gzipped + 2 KB worker)
 ```
 
 ---

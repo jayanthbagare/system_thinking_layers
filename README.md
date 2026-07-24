@@ -133,7 +133,7 @@ section 5). You can start exploring immediately.
 | Command             | What it does                                                                                                                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run build`     | Creates a production build in the `dist/` folder. You can open `dist/index.html` directly in a browser, or deploy it to any static host. |
-| `npm test`          | Runs the test suite (195 automated tests). Not needed for normal use.                                                                    |
+| `npm test`          | Runs the test suite (335 automated tests). Not needed for normal use.                                                                    |
 | `npm run lint`      | Checks code quality. Only relevant if you are editing the source.                                                                        |
 | `npm run typecheck` | Checks TypeScript types. Only relevant if you are editing the source.                                                                    |
 

@@ -17,20 +17,25 @@ import { validate } from "@/model/validate";
 import type { Weights } from "@/layer2/scoring";
 import { withComputedLoops } from "@/graph/loops";
 import { serializeGraphYaml } from "@/dsl/parser";
+import type { ScenarioTray, ScenarioCard } from "@/scenario";
+import { emptyTray } from "@/scenario";
 
 export interface Session {
   version: 1;
   graph: Graph;
   weights: Weights;
+  /** Phase 9 scenario tray. Optional: older sessions load with an empty tray. */
+  tray?: ScenarioTray;
   savedAt: string;
 }
 
 /** Serialize a session to a pretty-printed JSON string. */
-export function saveSession(graph: Graph, weights: Weights): string {
+export function saveSession(graph: Graph, weights: Weights, tray: ScenarioTray = emptyTray()): string {
   const session: Session = {
     version: 1,
     graph,
     weights,
+    tray,
     savedAt: new Date().toISOString(),
   };
   return JSON.stringify(session, null, 2);
@@ -67,7 +72,23 @@ export function loadSession(input: string): Session {
     // Backward compatibility: older sessions predate the sensitivity signal.
     sensitivity: raw.weights?.sensitivity ?? 1,
   };
-  return { version: 1, graph, weights, savedAt: raw.savedAt ?? "" };
+  // Phase 9: restore the scenario tray. Older sessions without a tray load as
+  // empty. The tray is plain data; we only sanity-check its shape (cards is an
+  // array, chosenId is a string or null) so a corrupt file fails loudly rather
+  // than silently rendering a broken tray.
+  const tray = loadTray(raw.tray);
+  return { version: 1, graph, weights, tray, savedAt: raw.savedAt ?? "" };
+}
+
+/** Validate and restore a scenario tray from raw session data. */
+function loadTray(raw: unknown): ScenarioTray {
+  if (raw === null || raw === undefined) return emptyTray();
+  if (typeof raw !== "object") return emptyTray();
+  const r = raw as Partial<ScenarioTray>;
+  if (!Array.isArray(r.cards)) return emptyTray();
+  const cards = r.cards as ScenarioCard[];
+  const chosenId = typeof r.chosenId === "string" ? r.chosenId : null;
+  return { cards, chosenId };
 }
 
 /** Recursively strip prototype-pollution keys from an unknown value. */
@@ -83,8 +104,8 @@ function stripProtoKeys(value: unknown): unknown {
 }
 
 /** Trigger a browser download of the session JSON. */
-export function downloadSession(graph: Graph, weights: Weights, filename = "layers-session.json"): void {
-  const json = saveSession(graph, weights);
+export function downloadSession(graph: Graph, weights: Weights, tray: ScenarioTray = emptyTray(), filename = "layers-session.json"): void {
+  const json = saveSession(graph, weights, tray);
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

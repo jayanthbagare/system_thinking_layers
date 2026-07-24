@@ -18,7 +18,18 @@ import type { TypedIntervention } from "@/layer3";
 import { AbmPanel } from "@/abm";
 import { LayerSwitcher, type LayerControl } from "@/ui";
 import { downloadSession, downloadGraphYaml, uploadSession } from "@/io";
+import { serializeGraphYaml } from "@/dsl/parser";
 import { DEFAULT_ENGINE_OPTIONS } from "@/sim";
+import {
+  pinScenario,
+  nextScenarioId,
+  addCard,
+  removeCard,
+  chooseCard,
+  exportDecisionRecord,
+  emptyTray,
+  type ScenarioTray,
+} from "@/scenario";
 import type { DEFAULT_WEIGHTS } from "@/layer2/scoring";
 import type { Node } from "@/model/types";
 import type { NodeEditPatch } from "@/layer1";
@@ -157,6 +168,9 @@ function main(): void {
   root.append(l3Host);
   // Phase 5 migration trail — the ordered list of applied interventions.
   let migrationTrail: MigrationTrail = [];
+  // Phase 9 scenario tray — pinned interventions for side-by-side comparison
+  // and ADR export. Owned here (so it round-trips through session save/load).
+  let scenarioTray: ScenarioTray = emptyTray();
   const l3 = new Layer3Panel(l3Host, graph, {
     onApply: (iv: TypedIntervention) => {
       // Record the migration step (computes before/after constraints + deltas).
@@ -190,6 +204,53 @@ function main(): void {
         }));
       renderer.drawMigrationArcs(arcs);
       downloadGraphYaml(graph);
+    },
+    onPinScenario: (iv: TypedIntervention) => {
+      // Capture the current typed intervention as a comparable card. Pure
+      // `pinScenario` derives the full metric set + constraint-after from the
+      // current working graph; the card is appended to the tray.
+      const sens = l2.getSensitivities();
+      const id = nextScenarioId(scenarioTray);
+      const card = pinScenario(graph, iv, {
+        id,
+        pinnedAt: new Date().toISOString(),
+        engine: DEFAULT_ENGINE_OPTIONS,
+        steps: 500,
+        weights,
+        sensitivities: sens,
+        robustnessN: 50,
+      });
+      scenarioTray = addCard(scenarioTray, card);
+      l3.setTray(scenarioTray);
+    },
+    onChooseScenario: (id: string | null) => {
+      scenarioTray = chooseCard(scenarioTray, id);
+      l3.setTray(scenarioTray);
+    },
+    onRemoveScenario: (id: string) => {
+      scenarioTray = removeCard(scenarioTray, id);
+      l3.setTray(scenarioTray);
+    },
+    onExportDecisionRecord: () => {
+      const sens = l2.getSensitivities();
+      const md = exportDecisionRecord(graph, scenarioTray, {
+        weights,
+        sensitivities: sens,
+        engine: DEFAULT_ENGINE_OPTIONS,
+        steps: 500,
+        migrationTrail,
+        modelYaml: serializeGraphYaml(graph),
+        toolVersion: "1.0",
+        generatedAt: new Date().toISOString(),
+        robustnessN: 50,
+      });
+      const blob = new Blob([md], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "decision-record.md";
+      a.click();
+      URL.revokeObjectURL(url);
     },
   });
 
@@ -305,7 +366,7 @@ function main(): void {
   const saveBtn = document.createElement("button");
   saveBtn.type = "button";
   saveBtn.textContent = "Save session";
-  saveBtn.addEventListener("click", () => downloadSession(graph, weights));
+  saveBtn.addEventListener("click", () => downloadSession(graph, weights, scenarioTray));
   const loadBtn = document.createElement("button");
   loadBtn.type = "button";
   loadBtn.textContent = "Load session";
@@ -324,9 +385,11 @@ function main(): void {
           graph.edges = session.graph.edges;
           graph.loops = session.graph.loops;
           weights = session.weights;
+          scenarioTray = session.tray ?? emptyTray();
           l2.setWeights(weights);
           renderer.render(graph);
           l3.setWeights(weights);
+          l3.setTray(scenarioTray);
         })
         .catch((err: unknown) => {
           window.alert(`Failed to load session: ${err instanceof Error ? err.message : String(err)}`);

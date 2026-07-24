@@ -1254,3 +1254,79 @@ dialog.edit-modal::backdrop {
   stroke-width: 3;
   stroke-dasharray: 4 3;
 }
+
+/* ---------- Layer 3 scenario tray (Phase 9) ---------- */
+.layer3-tray {
+  margin-top: 10px;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 8px;
+}
+.layer3-tray-empty {
+  font-size: 0.8rem;
+  color: #888;
+  font-style: italic;
+}
+.layer3-tray-table-wrap {
+  overflow-x: auto;
+}
+.layer3-tray-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.layer3-tray-table th,
+.layer3-tray-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+  text-align: right;
+}
+.layer3-tray-table th {
+  text-align: center;
+  font-weight: 600;
+  color: #555;
+}
+.layer3-tray-table th:first-child,
+.layer3-tray-table td:first-child {
+  text-align: center;
+}
+.layer3-tray-table tr.is-chosen {
+  background: #e8f5e9;
+}
+.layer3-tray-remove {
+  padding: 0 6px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  color: #c62828;
+}
+.layer3-tray-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.layer3-tray-export {
+  padding: 6px 12px;
+  border: 1px solid var(--c-delay);
+  border-radius: 6px;
+  background: var(--c-delay);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.layer3-pin-btn {
+  padding: 6px 12px;
+  border: 1px solid #999;
+  border-radius: 6px;
+  background: #f5f5f5;
+  font: inherit;
+  cursor: pointer;
+}
+.layer3-pin-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

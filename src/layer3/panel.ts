@@ -41,6 +41,8 @@ import {
 } from "@/layer3";
 import { sparkline, type SparklineSeries } from "@/layer3";
 import { DEFAULT_WEIGHTS, topConstraints, type Weights } from "@/layer2/scoring";
+import type { ScenarioTray } from "@/scenario";
+import { emptyTray } from "@/scenario";
 
 const PRE_COLOR = "#9e9e9e";
 const POST_COLOR = "#1976d2";
@@ -77,12 +79,26 @@ export interface Layer3PanelOptions {
    * typed intervention so the host can persist it to the working graph and
    * record a migration step. */
   onApply?: (iv: TypedIntervention) => void;
+  /** Phase 9 — "Pin scenario": capture the current typed intervention as a
+   * comparable card. The host builds the card (pure `pinScenario`) and calls
+   * `setTray` with the updated tray. */
+  onPinScenario?: (iv: TypedIntervention) => void;
+  /** Phase 9 — mark a card as the decision (or null to clear). */
+  onChooseScenario?: (id: string | null) => void;
+  /** Phase 9 — remove a card from the tray. */
+  onRemoveScenario?: (id: string) => void;
+  /** Phase 9 — export the decision record as ADR-shaped Markdown. */
+  onExportDecisionRecord?: () => void;
 }
 
 export class Layer3Panel {
   private readonly host: HTMLElement;
   private readonly graph: Graph;
   private readonly onApply: ((iv: TypedIntervention) => void) | undefined;
+  private readonly onPinScenario: ((iv: TypedIntervention) => void) | undefined;
+  private readonly onChooseScenario: ((id: string | null) => void) | undefined;
+  private readonly onRemoveScenario: ((id: string) => void) | undefined;
+  private readonly onExportDecisionRecord: (() => void) | undefined;
   private nodeId: string;
   private weights: Weights = { ...DEFAULT_WEIGHTS };
   /** Once the user picks a node from the dropdown, stop auto-following L2. */
@@ -107,10 +123,17 @@ export class Layer3Panel {
 
   private active = false;
 
+  /** Phase 9 scenario tray — owned by main.ts (for save/load); rendered here. */
+  private tray: ScenarioTray = emptyTray();
+
   constructor(host: HTMLElement, graph: Graph, opts: Layer3PanelOptions = {}) {
     this.host = host;
     this.graph = graph;
     this.onApply = opts.onApply;
+    this.onPinScenario = opts.onPinScenario;
+    this.onChooseScenario = opts.onChooseScenario;
+    this.onRemoveScenario = opts.onRemoveScenario;
+    this.onExportDecisionRecord = opts.onExportDecisionRecord;
     this.host.classList.add("layer3-panel");
     // Default to the Layer 2 top-ranked constraint as the intervention node —
     // the spec frames Layer 3 as "what moving the constraint does." Re-derived
@@ -138,6 +161,12 @@ export class Layer3Panel {
     if (this.active) this.disable();
     else this.enable();
     return this.active;
+  }
+
+  /** Replace the scenario tray and re-render the tray section (Phase 9). */
+  setTray(tray: ScenarioTray): void {
+    this.tray = tray;
+    this.renderTray();
   }
 
   /** Select a different intervention node. */
@@ -196,6 +225,8 @@ export class Layer3Panel {
     this.host.append(this.renderHeader());
     this.host.append(this.renderControls());
     this.host.append(this.renderSparklines());
+    this.host.append(this.renderTrayHost());
+    this.renderTray();
   }
 
   private renderHeader(): HTMLElement {
@@ -320,10 +351,35 @@ export class Layer3Panel {
         target: this.nodeId,
         magnitude: this.magnitude,
         ...(this.type === "subordinate" ? { rope: this.rope } : {}),
+        ...(this.type === "structural" ? { edit: this.buildStructuralEdit() } : {}),
       };
       this.onApply(iv);
     });
     applyRow.append(applyBtn);
+
+    // Phase 9 — "Pin scenario": capture the current typed intervention as a
+    // comparable card. Disabled in raw-impulse mode (a nudge probe is not a
+    // scenario). The host builds the card via the pure `pinScenario` and
+    // calls `setTray` with the updated tray.
+    const pinBtn = document.createElement("button");
+    pinBtn.type = "button";
+    pinBtn.textContent = "Pin scenario";
+    pinBtn.className = "layer3-pin-btn";
+    pinBtn.dataset.role = "pin-scenario";
+    pinBtn.disabled = this.mode !== "typed" || !this.onPinScenario;
+    pinBtn.title = "Capture this intervention as a scenario card for side-by-side comparison and ADR export.";
+    pinBtn.addEventListener("click", () => {
+      if (this.mode !== "typed" || !this.onPinScenario) return;
+      const iv: TypedIntervention = {
+        type: this.type,
+        target: this.nodeId,
+        magnitude: this.magnitude,
+        ...(this.type === "subordinate" ? { rope: this.rope } : {}),
+        ...(this.type === "structural" ? { edit: this.buildStructuralEdit() } : {}),
+      };
+      this.onPinScenario(iv);
+    });
+    applyRow.append(pinBtn);
     wrap.append(applyRow);
 
     return wrap;
@@ -863,6 +919,125 @@ export class Layer3Panel {
     return initialState(this.graph, this.engineOpts());
   }
 
+  // --- Phase 9: scenario tray ------------------------------------------
+
+  private renderTrayHost(): HTMLElement {
+    const host = document.createElement("div");
+    host.className = "layer3-tray";
+    host.dataset.role = "tray";
+    return host;
+  }
+
+  private renderTray(): void {
+    const host = this.host.querySelector<HTMLElement>('[data-role="tray"]');
+    if (!host) return;
+    host.innerHTML = "";
+
+    const title = document.createElement("p");
+    title.className = "layer3-caption";
+    title.textContent = "Scenario tray — pin interventions to compare on the same axes.";
+    host.append(title);
+
+    if (this.tray.cards.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "layer3-tray-empty";
+      empty.textContent = "No scenarios pinned. Configure an intervention and click \u201cPin scenario.\u201d";
+      host.append(empty);
+    } else {
+      host.append(this.renderTrayTable());
+      host.append(this.renderTrayActions());
+    }
+  }
+
+  private renderTrayTable(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "layer3-tray-table-wrap";
+    const table = document.createElement("table");
+    table.className = "layer3-tray-table";
+    const head = document.createElement("tr");
+    for (const h of ["", "id", "tier", "\u0394T", "\u0394I", "\u0394OE", "\u0394DoF", "pred-after", "obs-after", "verdict"]) {
+      const th = document.createElement("th");
+      th.textContent = h;
+      head.append(th);
+    }
+    table.append(head);
+    for (const c of this.tray.cards) {
+      const tr = document.createElement("tr");
+      tr.classList.toggle("is-chosen", c.id === this.tray.chosenId);
+      const radio = document.createElement("td");
+      const r = document.createElement("input");
+      r.type = "radio";
+      r.name = "tray-chosen";
+      r.checked = c.id === this.tray.chosenId;
+      r.title = "Mark this scenario as the decision.";
+      r.disabled = !this.onChooseScenario;
+      r.addEventListener("change", () => {
+        if (this.onChooseScenario) this.onChooseScenario(r.checked ? c.id : null);
+      });
+      radio.append(r);
+      tr.append(radio);
+      const cells = [
+        c.id,
+        `T${c.tier}`,
+        fmtSigned(c.deltaT),
+        fmtSigned(c.deltaI),
+        fmtSigned(c.deltaOE),
+        fmtSigned(c.dof.delta),
+        this.labelOf(c.predictedAfter),
+        this.labelOf(c.observedAfter),
+        c.robustnessVerdict ?? "\u2014",
+      ];
+      for (const txt of cells) {
+        const td = document.createElement("td");
+        td.textContent = txt;
+        tr.append(td);
+      }
+      // Remove button.
+      const rm = document.createElement("td");
+      const rmBtn = document.createElement("button");
+      rmBtn.type = "button";
+      rmBtn.textContent = "\u00d7";
+      rmBtn.className = "layer3-tray-remove";
+      rmBtn.title = "Remove this scenario from the tray.";
+      rmBtn.disabled = !this.onRemoveScenario;
+      rmBtn.addEventListener("click", () => {
+        if (this.onRemoveScenario) this.onRemoveScenario(c.id);
+      });
+      rm.append(rmBtn);
+      tr.append(rm);
+      table.append(tr);
+    }
+    wrap.append(table);
+    return wrap;
+  }
+
+  private renderTrayActions(): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "layer3-tray-actions";
+    if (this.tray.chosenId && this.onChooseScenario) {
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.textContent = "Clear decision";
+      clear.addEventListener("click", () => this.onChooseScenario!(null));
+      row.append(clear);
+    }
+    if (this.onExportDecisionRecord) {
+      const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
+      exportBtn.textContent = "Export decision record (.md)";
+      exportBtn.className = "layer3-tray-export";
+      exportBtn.title = "Download an ADR-shaped Markdown document with diagram, options, decision, and provenance.";
+      exportBtn.addEventListener("click", () => this.onExportDecisionRecord!());
+      row.append(exportBtn);
+    }
+    return row;
+  }
+
+  private labelOf(id: string | null): string {
+    if (!id) return "\u2014";
+    return this.graph.nodes.find((n) => n.id === id)?.label ?? id;
+  }
+
   // --- sync helpers ------------------------------------------------------
 
   private syncNodeSelect(): void {
@@ -878,6 +1053,8 @@ export class Layer3Panel {
     if (struct) struct.style.display = this.mode === "typed" && this.type === "structural" ? "" : "none";
     const applyBtn = this.host.querySelector<HTMLButtonElement>('[data-role="apply"]');
     if (applyBtn) applyBtn.disabled = this.mode !== "typed";
+    const pinBtn = this.host.querySelector<HTMLButtonElement>('[data-role="pin-scenario"]');
+    if (pinBtn) pinBtn.disabled = this.mode !== "typed" || !this.onPinScenario;
   }
 
   /** Clamp the current magnitude into the active slider's range (exploit cap). */
@@ -1002,6 +1179,10 @@ export class Layer3Panel {
 function formatNumber(v: number): string {
   if (Number.isInteger(v)) return String(v);
   return v.toFixed(2);
+}
+
+function fmtSigned(v: number): string {
+  return `${v >= 0 ? "+" : ""}${formatNumber(v)}`;
 }
 
 export type { Node };
