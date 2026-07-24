@@ -954,13 +954,16 @@ export class Layer3Panel {
     wrap.className = "layer3-tray-table-wrap";
     const table = document.createElement("table");
     table.className = "layer3-tray-table";
+    const thead = document.createElement("thead");
     const head = document.createElement("tr");
-    for (const h of ["", "id", "tier", "\u0394T", "\u0394I", "\u0394OE", "\u0394DoF", "pred-after", "obs-after", "verdict"]) {
+    for (const h of ["", "id", "tier", "\u0394T", "\u0394I", "\u0394OE", "\u0394DoF", "pred-after", "obs-after", "verdict", ""]) {
       const th = document.createElement("th");
       th.textContent = h;
       head.append(th);
     }
-    table.append(head);
+    thead.append(head);
+    table.append(thead);
+    const tbody = document.createElement("tbody");
     for (const c of this.tray.cards) {
       const tr = document.createElement("tr");
       tr.classList.toggle("is-chosen", c.id === this.tray.chosenId);
@@ -1005,8 +1008,9 @@ export class Layer3Panel {
       });
       rm.append(rmBtn);
       tr.append(rm);
-      table.append(tr);
+      tbody.append(tr);
     }
+    table.append(tbody);
     wrap.append(table);
     return wrap;
   }
