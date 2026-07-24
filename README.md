@@ -196,8 +196,8 @@ The right-side panel swaps depending on which layer is active:
 
 - **L1: CLD** — the **live node monitor** (sparklines of node values over
   time; see below).
-- **L2: Constraints** — the constraint panel (sliders + ranked list).
-- **L3: T/I/OE** — the simulation panel (sparklines).
+- **L2: Constraints** — heat coloring + the constraint ranking panel (full height, right side).
+- **L3: T/I/OE** — the simulation panel with typed interventions and sparklines (full height, right side).
 - **ABM** — the ABM companion panel (full right-side height).
 
 Only one panel is visible at a time (the layer switcher enforces this).
@@ -346,10 +346,13 @@ diagram with no overlays.
   center of each loop. Reinforcing loops are **green**; balancing loops
   are **red**.
 
-- **Traveling signals** — when the animation is playing, small dots ride
-  along the edges. These are the pulses carrying value changes from node
-  to node. A pulse on a `+` edge keeps its sign; on a `−` edge it flips.
-  Reinforcing loops amplify them; balancing loops dampen them.
+- **Traveling signals** — when you nudge a node, a colored dot rides each
+  outgoing edge and then chains onward: when it arrives at a target it
+  immediately spawns fresh dots on that node's outgoing edges, so the pulse
+  propagates hop-by-hop across the whole network. Green dots = positive
+  (growth) direction; red dots = negative (decline) direction. The pulse
+  travels at a fixed wall-clock speed independent of the simulation engine,
+  so it is always readable even on heavily-delayed graphs.
 
 ### How to interact
 
@@ -387,17 +390,16 @@ The diagram is not static — it is alive. By default, the animation is
 2. **Click ▲** to nudge the value up, or **▼** to nudge it down. Each
    click emits a pulse carrying that signed change onto every outgoing
    edge.
-3. **Watch the pulse travel.** A small dot rides along each arrow. When
-   it reaches the target node, that node's value shifts (and its inner
-   value circle resizes and recolors — green for growth, red for decline),
-   then a fresh pulse rides onward down that node's outgoing edges.
+3. **Watch the pulse travel.** A colored dot rides along each outgoing
+   edge. When it arrives at the target node, that node's value shifts
+   (and its inner value circle resizes and recolors), then fresh dots
+   ride onward along that node's outgoing edges — hop by hop across the
+   whole network. Green = positive (growth); red = negative (decline).
 4. **Watch the loop close.** On a reinforcing loop where edge strengths
    exceed 1, the pulse comes back bigger (amplification) — this is the
-   bullwhip effect made visible. On a balancing loop, or where strengths
-   are below 1, the pulse dampens. In the beer model, the order-triggering
-   edges (backlog → orders) have a strength of 1.3, so a small demand nudge
-   amplifies as it travels upstream: each stage's value circle grows larger
-   than the last.
+   bullwhip effect made visible. On a balancing loop the pulse dampens.
+   In the beer model, the order-triggering edges have a strength of 1.3,
+   so a small demand nudge amplifies as it travels upstream.
 5. **Watch the live node monitor** (right side, L1 only). The node you
    nudged gets its value plotted over time in a sparkline. If the graph has
    fewer than 7 nodes (the beer model has 6), you see a sparkline for every
@@ -633,118 +635,125 @@ dollar amounts. The moment you try to read them as precise forecasts, the
 tool stops being useful for architectural thinking. Trust the direction
 and the relative magnitude; do not trust the absolute numbers.
 
-### The side panel (bottom-right)
+### The side panel (right side, full height)
 
 ```
 ┌──────────────────────────────────────┐
 │ Layer 3 — T / I / OE         [Off]   │
+│                                      │
+│  [Exploit] [Subordinate] [Elevate]   │  ← intervention type
+│  [Structural]                        │
 │                                      │
 │ Intervention node                    │
 │ ┌──────────────────────────────────┐ │
 │ │ Wholesaler Orders          ▼     │ │
 │ └──────────────────────────────────┘ │
 │                                      │
-│ Intervention Δ             50        │
+│ Magnitude                  20        │
 │ ━━━━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
 │                                      │
-│ Step size (dt)            0.10        │
+│ Step size (dt)            0.10       │
 │ ━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
 │                                      │
-│ Steps                    200          │
-│ ━━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━  │
+│ Steps                    200         │
+│ ━━━━━━━━━━━━●━━━━━━━━━━━━━━━━━━━━━  │
 │                                      │
-│ Integrator                           │
-│ [Euler]  [RK4]                       │
+│ [Euler]  [RK4]          [Apply] [Pin]│
 │                                      │
-│ Pre (grey) vs. post (blue)           │
-│ intervention. Directional delta only.│
+│ T · Throughput            Δ +12.30   │
+│ I · Inventory/Investment  Δ -5.70    │
+│ OE · Operating Expense    Δ +3.20    │
 │                                      │
-│ ┌──────────────────────────────────┐ │
-│ │ T · Throughput        Δ +12.30   │ │
-│ │ ╱╲    ╱╲    ╱╲                 │ │  ← sparkline
-│ └──────────────────────────────────┘ │
-│ ┌──────────────────────────────────┐ │
-│ │ I · Investment/Inv.   Δ -5.70   │ │
-│ │ ─╲╱─╲╱─╲╱─                    │ │  ← sparkline
-│ └──────────────────────────────────┘ │
-│ ┌──────────────────────────────────┐ │
-│ │ OE · Operating Expense Δ +3.20   │ │
-│ │ ──╱╲╱╲╱╲───                   │ │  ← sparkline
-│ └──────────────────────────────────┘ │
+│ Leverage tier · Signature · Ratios   │
+│ J-curve · DoF · Scenario tray        │
 └──────────────────────────────────────┘
 ```
 
-#### The controls
+#### Intervention types
 
-| Control                          | What it does                                                                                                 | Range                 |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------- |
-| **Intervention node** (dropdown) | Which node to apply the hypothetical change to. Defaults to the Layer 2 #1 constraint.                       | Any node in the graph |
-| **Intervention Δ** (slider)      | The size of the change applied to that node at time zero. Positive = increase; negative = decrease.          | −200 to +200          |
-| **Step size (dt)** (slider)      | How fine-grained each simulation step is. Smaller = more accurate but slower.                                | 0.01 to 1.0           |
-| **Steps** (slider)               | How many steps to simulate. More steps = longer time horizon.                                                | 50 to 2000            |
-| **Integrator** (two buttons)     | The math method. **RK4** (default) is more accurate. **Euler** is faster but less accurate on stiff systems. | Euler or RK4          |
+The panel uses the Five Focusing Steps vocabulary. You pick an
+intervention *type*, not a raw number:
+
+| Type            | What it does                                                                                                                   | Expected T/I/OE effect          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| **Exploit**     | Raise the node's operating point toward its *existing* upper collar. Collar does not move. Slider capped at available headroom; disabled with no collar or no headroom. | T up, OE flat, I flat or down |
+| **Subordinate** | Splice a rope — a negative-polarity information edge from a downstream buffer back to the upstream release flow. Reduces pressure on a collar that cannot absorb it.    | I down sharply, T flat, OE flat |
+| **Elevate**     | Move the upper collar up; the node's `capacity_cost` scales proportionally so OE rises. Use after Exploit headroom is exhausted. | T up, OE up, I up             |
+| **Structural**  | Change graph topology: collapse a delay, flip a polarity, split a node. Higher leverage, harder to reverse.                    | Depends on the edit             |
+
+> **Exploit before Elevate.** The Exploit slider is capped at available
+> headroom. When headroom is zero the slider is disabled and a reason
+> line explains why. This enforces the ToC discipline: pay for new
+> capacity only after you have used what you already have.
+>
+> **Magnitude slider disabled?** On Exploit, this means the node has no
+> upper collar. Switch to **Elevate**, or add a collar via shift-click →
+> edit modal.
+
+#### Other controls
+
+| Control                  | What it does                                                                              | Range          |
+| ------------------------ | ----------------------------------------------------------------------------------------- | -------------- |
+| **Intervention node**    | Which node to change. Defaults to the Layer 2 #1 constraint.                             | Any node       |
+| **Magnitude**            | How large the change is. Range and meaning depend on the type.                            | Type-dependent |
+| **Step size (dt)**       | Finer = more accurate but slower.                                                         | 0.01 to 1.0    |
+| **Steps**                | More = longer time horizon.                                                               | 50 to 2000     |
+| **Integrator**           | **RK4** (default, more accurate) or **Euler** (faster, less accurate on stiff systems).  | Euler / RK4    |
+| **Apply Intervention**   | Persists the intervention to the working graph; records a migration step in Layer 2.     | —              |
+| **Pin scenario**         | Saves the current intervention as a card in the scenario tray for side-by-side comparison. Pinning never mutates the graph. | — |
 
 #### The sparklines
 
-Three small charts, one for each T/I/OE category. These are **derived from the system boundary + topology**, not from hand-authored tags:
+Three charts, one each for T, I, OE — **derived from the system boundary
++ topology**, not hand-authored:
 
-- **T · Throughput** — the rate of flow across the system boundary (outbound delivery to the market, or inbound demand when no outbound edges exist).
-- **I · Inventory / Investment** — the total stock mass + in-flight material inside the system boundary.
-- **OE · Operating Expense** — the flow through constrained resources (collared stocks) inside the system.
+- **T · Throughput** — rate of flow across the system boundary.
+- **I · Inventory / Investment** — total stock mass + in-flight material inside the system.
+- **OE · Operating Expense** — flow through constrained (collared) resources inside the system.
 
-Each sparkline shows two lines:
-
-- **Grey line** — the "pre" run (the system as-is, no intervention).
-- **Blue line** — the "post" run (with your intervention applied).
-
-At the top-right of each sparkline is a **delta badge** showing the
-end-of-run difference: `Δ +12.30` (green, went up) or `Δ −5.70` (red,
+Each shows a **grey** (pre) and **blue** (post) line, with a **delta
+badge** at the end: `Δ +12.30` (green = went up) or `Δ −5.70` (red =
 went down).
+
+Below the sparklines: **leverage tier** (parameter / bound / structural
+/ etc.), **signature** (expected vs observed T/I/OE direction —
+disagreements flagged in red), **TA ratios** (ΔT/ΔOE, payback horizon),
+**J-curve** (worse-before-better depth and duration), and
+**degrees-of-freedom change**.
 
 ### How to use it
 
-1. **Pick a node to intervene on.** The dropdown defaults to the Layer 2
-   top constraint, which is usually what you want. You can choose any
-   node.
+1. **Choose an intervention type.** Start with **Exploit** on the Layer 2
+   top constraint. If the slider is disabled (no collar / no headroom),
+   switch to **Elevate**.
 
-2. **Set the intervention size.** Drag the Δ slider. Positive values
-   simulate increasing the node (e.g., adding capacity); negative values
-   simulate decreasing it (e.g., removing a delay). The sparklines update
-   instantly.
+2. **Set the magnitude.** Drag the slider. Sparklines update instantly.
 
-3. **Or nudge directly from the canvas.** Instead of the slider, switch
-   to Layer 1 (or keep Layer 3's panel active) and click a node's **▲/▼**
-   nudge arrows. Each nudge selects that node as the intervention node
-   and sets the Δ's sign from the nudge direction (▲ = positive, ▼ =
-   negative), keeping the current magnitude. The sparklines re-simulate
-   immediately, so you see the financial consequence of each poke as you
-   "run the network." This is the bridge between the live Layer 1
-   animation and the quantitative Layer 3 view.
+3. **Or nudge from the canvas.** Switch to Layer 1, hover a node, click
+   ▲/▼. The nudge selects that node and the sparklines re-simulate —
+   this is the bridge between the live animation and the quantitative view.
 
-4. **Read the sparklines.** For each of T, I, OE:
-   - Did the blue line end above or below the grey line? That tells you
-     the direction of the effect.
-   - How big is the gap? That tells you the relative magnitude.
-   - Does the blue line oscillate where the grey line was smooth? That
-     tells you the intervention destabilized the system.
+4. **Read the analysis.** Leverage tier tells you how structural the move
+   is. Signature tells you whether T actually went the right way. Ratios
+   tell you the cost efficiency.
 
-5. **Adjust the simulation settings if needed.** If the sparklines look
-   jagged or unstable, switch to RK4 (if not already) or decrease the
-   step size. If you want to see further into the future, increase the
-   number of steps.
+5. **Pin scenarios for comparison.** Try Exploit, pin it. Try Elevate,
+   pin it. The tray shows both on the same axes.
+
+6. **Apply** the chosen intervention to commit. The graph updates; Layer
+   2 re-ranks; the migration trail records the step.
 
 ### Worked example with the beer model
 
-1. With the beer model loaded and Layer 2 active, note that **Wholesaler
-   Orders** is the #1 constraint.
-2. Switch to **L3: T/I/OE**. The intervention node is already set to
-   Wholesaler Orders.
-3. Set Δ to **+50** (simulate boosting wholesale order capacity by 50).
-4. Watch the sparklines: Throughput (T) likely rises; Inventory (I) may
-   dip then recover; Operating Expense (OE) may rise slightly.
-5. Now set Δ to **−50** (simulate cutting wholesale orders by 50). The
-   sparklines flip direction. This tells you the system is sensitive to
-   this node in both directions — confirming it is a real constraint.
+1. Switch to **L3: T/I/OE**. Node defaults to **Wholesaler Orders** (L2 #1).
+2. Select **Exploit**. If disabled (no collar), select **Elevate** and
+   set magnitude to **+30** to raise the capacity ceiling.
+3. Watch: Throughput rises; OE rises with it (Elevate raises OE). Leverage
+   tier shows "Tier 2 — Bound."
+4. Try **Subordinate**: add a rope from wholesaler backlog to retailer order
+   rate. Inventory drops sharply while Throughput holds.
+5. Pin both. The tray compares Elevate vs Subordinate on the same axes.
+   Subordinate has better ΔT/ΔOE — it costs nothing in OE.
 
 ---
 

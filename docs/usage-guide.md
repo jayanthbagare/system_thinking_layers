@@ -111,21 +111,31 @@ always visible underneath the other layers.
 ### What You See
 
 - **Nodes** — circles labeled with the node's `label`. Pinned nodes have a
-  thicker border.
+  thicker border. The inner **value circle** grows/shrinks and colors green
+  (above rest) or red (below rest) as the live simulation runs.
 - **Edges** — straight arrows from source to target with a polarity symbol
-  (`+` or `−`) at the midpoint.
+  (`+` or `−`) at the midpoint in a chip that sits above all other elements.
 - **Delay marks** — edges with `delay.type ≠ none` and `magnitude > 0` are
   decorated with a **double-hash mark** (two short perpendicular strokes) and
-  a small numeric badge showing the delay magnitude.
+  a small numeric badge showing the delay magnitude. Both the polarity chip and
+  delay badge render above the node and signal layers so they are never obscured.
 - **Loop labels** — `R1`, `R2`, `B1`, etc. placed at each loop's centroid.
   Reinforcing loops are green; balancing loops are red.
+- **Nudge arrows** — ▲/▼ appear above/below a node on hover. Click to emit a
+  signed pulse on all outgoing edges.
+- **Nudge pulse** — a colored dot travels hop-by-hop across the full network:
+  on arrival at each node it spawns fresh dots on that node's outgoing edges.
+  Green = positive direction; red = negative. Rendered in the topmost SVG
+  layer so it is always visible above nodes and edges.
 
 ### Interactions
 
 | Action | Effect |
 |---|---|
-| **Drag a node** | Moves it; the position is persisted as a `pin` on the node (survives save/load). The force simulation resumes briefly. |
-| **Hover a node** | Highlights the first loop the node belongs to — only that loop's edges and nodes stay bright; everything else dims. |
+| **Hover a node** | ▲/▼ nudge arrows appear; first loop the node belongs to highlights. |
+| **Click ▲ / ▼** | Nudges value up/down; emits a signed pulse that propagates hop-by-hop across the network. |
+| **Shift-click a node** | Opens the edit modal — change label, type, collar, initial value, etc. |
+| **Drag a node** | Moves it; position persisted as a `pin` (survives save/load). |
 | **Hover a loop label** | Highlights that specific loop. |
 | **Pan** | Click and drag the background. |
 | **Zoom** | Mouse wheel or trackpad scroll. Scale range: 0.2×–4×. |
@@ -154,7 +164,7 @@ likely sitting, and why?*
 
 ### The Score
 
-Each node gets a score in `[0, 1]` — a weighted sum of four signals:
+Each node gets a score in `[0, 1]` — a weighted sum of five signals:
 
 | Signal | What it measures | Why it matters |
 |---|---|---|
@@ -162,6 +172,7 @@ Each node gets a score in `[0, 1]` — a weighted sum of four signals:
 | **Delay ratio** (`w2`) | Max incident delay ÷ average loop cycle time | Long delays relative to surrounding loops cause pile-up |
 | **Rate mismatch** (`w3`) | Gap between avg reinforcing and avg balancing loop cycle times at the node | Where a fast reinforcing loop meets a slow balancing loop, inventory or oscillation builds |
 | **Dominant-loop share** (`w4`) | Node's max loop cycle time ÷ global max loop cycle time | Nodes in the loop with the longest cycle time score higher |
+| **Sensitivity** (`w5`) | L2 norm of the trajectory deviation caused by a unit nudge at this node | A node whose nudge ripples furthest has the most leverage — and the most risk |
 
 The final score is normalized by the weight sum, so **only the ratios between
 weights matter** — scaling all weights by a constant leaves scores unchanged.
@@ -203,6 +214,25 @@ Layer 3 adds a lightweight stock-flow simulation engine. It answers: *what
 happens to Throughput, Investment-Inventory, and Operating Expense if I shift
 a parameter at the identified constraint?*
 
+The panel uses the **Five Focusing Steps** vocabulary. You choose an
+intervention *type* (Exploit / Subordinate / Elevate / Structural), not a
+raw Δ value. The type selector enforces ToC discipline: Exploit is capped at
+available headroom and disabled at zero headroom, making the case for Elevate
+legible only when headroom is genuinely exhausted.
+
+### Intervention types
+
+| Type | What it does | Expected T/I/OE |
+|---|---|---|
+| **Exploit** | Raise the operating point toward the *existing* upper collar. Collar does not move. Slider capped at headroom; disabled if no collar. | T up, OE flat, I flat-or-down |
+| **Subordinate** | Splice a rope — a negative-polarity information edge from a downstream buffer back to the upstream release flow. | I down sharply, T flat, OE flat |
+| **Elevate** | Move the upper collar up; `capacity_cost` scales proportionally so OE rises. | T up, OE up, I up |
+| **Structural** | Collapse a delay, flip a polarity, split a node. | Depends on edit |
+
+> **Magnitude slider disabled?** On Exploit with no upper collar the slider is
+> disabled — the reason line explains why. Switch to Elevate, or add a collar
+> to the node via shift-click → edit modal.
+
 ### What It Computes
 
 The integrator (`src/layer3/integrator.ts`) steps through the graph's
@@ -224,18 +254,19 @@ Two integrators are available:
 
 ### The Side Panel
 
-The panel (bottom right) shows:
+The panel (right side, full height) shows:
 
-1. **Intervention node selector** — defaults to the Layer 2 top-ranked
-   constraint.
-2. **Intervention Δ slider** — the scalar shift applied to the node's value
-   at `t = 0` (range −200 to +200).
-3. **Step size (dt)** — integration step in model time units (0.01–1.0).
-4. **Steps** — number of integration steps (50–2000).
-5. **Integrator method** — Euler or RK4 toggle buttons.
-6. **Three sparklines** (T, I, OE) — each shows the **pre** (grey) and
-   **post** (blue) intervention trajectory on a shared y-axis, with an
-   end-of-run delta badge (`Δ +12.3` or `Δ −5.7`).
+1. **Intervention type selector** — Exploit / Subordinate / Elevate / Structural buttons.
+2. **Intervention node selector** — defaults to the Layer 2 top-ranked constraint.
+3. **Magnitude slider** — the size of the intervention (range and meaning depend on type).
+4. **Step size (dt)** — integration step in model time units (0.01–1.0).
+5. **Steps** — number of integration steps (50–2000).
+6. **Integrator method** — Euler or RK4 toggle.
+7. **Apply Intervention** — persists the intervention to the working graph and records a migration step.
+8. **Pin scenario** — saves the current intervention as a scenario card for side-by-side comparison.
+9. **Three sparklines** (T, I, OE) — each shows the **pre** (grey) and **post** (blue) trajectory, with an end-of-run delta badge (`Δ +12.3` or `Δ −5.7`).
+10. **Analysis** — leverage tier, expected vs observed signature (disagreements flagged), TA ratios (ΔT/ΔOE, ΔT/ΔI, payback horizon), J-curve (worse-before-better depth/duration), and degrees-of-freedom change.
+11. **Scenario tray** — pinned scenarios shown as a comparison table.
 
 ### Important Caveat
 
