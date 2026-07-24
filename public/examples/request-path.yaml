@@ -1,0 +1,133 @@
+# Request Path — metastable failure via retry loop and circuit breaker.
+#
+# A service call path with a collared downstream dependency. Retries form a
+# reinforcing loop: failures trigger retries, retries add load to an already-
+# struggling dependency, which produces more failures. The circuit breaker is
+# a balancing loop that breaks the retry loop when open, but introduces a
+# hysteresis gap — the system does not recover automatically after load is removed.
+#
+# Key lesson (Phase 7 showcase): the hard collar on downstream_capacity, combined
+# with the retry reinforcing loop, produces classic metastable failure. At ρ > 0.90
+# the system tips: retry load exceeds capacity headroom, downstream pins at its
+# upper collar, latency climbs, clients time out and retry faster — a vicious cycle.
+# After load is removed the circuit breaker stays open; recovery requires an
+# explicit reset (Subordinate: add a recovery-rate edge, or Elevate the collar).
+# The utilisation curve's steep section near ρ = 1 makes this tipping point visible.
+#
+# Exercises: Phase 7 (utilisation curve, W ∝ ρ/(1−ρ), "you are here" marker at
+# the steep section), Phase 4 (Exploit: drain retry queue; Elevate: raise capacity),
+# Phase 8 (robustness: retry_fraction and timeout_rate ranges declared — constraint
+# identity unstable near the tipping point, "Unstable" verdict expected).
+
+nodes:
+  - id: incoming_requests
+    label: Incoming Requests
+    type: flow
+    boundary: true
+    initial_value: 1000
+    unit: req/s
+
+  - id: request_queue
+    label: Request Queue
+    type: stock
+    initial_value: 50
+    unit: requests
+    collar: { lower: 0 }
+
+  - id: upstream_capacity
+    label: Upstream Capacity
+    type: stock
+    initial_value: 950
+    unit: req/s
+    collar: { lower: 0, upper: 1200 }
+    capacity_cost: 500
+
+  - id: downstream_capacity
+    label: Downstream Dependency
+    type: stock
+    initial_value: 900
+    unit: req/s
+    collar: { lower: 0, upper: 950, approach: hard }
+    capacity_cost: 2000
+
+  - id: retry_queue
+    label: Retry Queue
+    type: stock
+    initial_value: 10
+    unit: requests
+    collar: { lower: 0 }
+
+  - id: circuit_breaker_state
+    label: Circuit Breaker
+    type: auxiliary
+    initial_value: 1
+    unit: fraction open (0=closed, 1=open)
+
+  - id: successful_responses
+    label: Successful Responses
+    type: flow
+    boundary: true
+    initial_value: 900
+    unit: req/s
+
+edges:
+  - id: e1
+    source: incoming_requests
+    target: request_queue
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 1
+
+  - id: e2
+    source: request_queue
+    target: upstream_capacity
+    polarity: +
+    delay: { type: material, magnitude: 0.01 }
+    strength: 1
+
+  - id: e3
+    source: upstream_capacity
+    target: downstream_capacity
+    polarity: +
+    delay: { type: material, magnitude: 0.05 }
+    strength: 1
+
+  - id: e4
+    source: downstream_capacity
+    target: successful_responses
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 0.95
+
+  # Retry reinforcing loop: failures from downstream load the retry queue.
+  - id: e5
+    source: downstream_capacity
+    target: retry_queue
+    polarity: +
+    delay: { type: material, magnitude: 0.1 }
+    strength: 0.05
+    range: { strength: [0.02, 0.12] }
+
+  - id: e6
+    source: retry_queue
+    target: upstream_capacity
+    polarity: +
+    delay: { type: material, magnitude: 0.5 }
+    strength: 1
+
+  # Circuit breaker: high failure rate opens the breaker, reducing upstream load.
+  # Balancing loop — the counterforce to the retry reinforcing loop.
+  - id: e7
+    source: retry_queue
+    target: circuit_breaker_state
+    polarity: +
+    delay: { type: information, magnitude: 1 }
+    strength: 0.4
+    range: { strength: [0.2, 0.6] }
+
+  - id: e8
+    source: circuit_breaker_state
+    target: upstream_capacity
+    polarity: "-"
+    delay: { type: information, magnitude: 0.5 }
+    strength: 0.8

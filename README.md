@@ -14,7 +14,7 @@ step.
 4. [Tour of the Main Screen](#4-tour-of-the-main-screen)
 5. [The Built-In Example: Beer Distribution](#5-the-built-in-example-beer-distribution)
 6. [Layer 1 — The Causal Loop Diagram](#6-layer-1--the-causal-loop-diagram)
-7. [Layer 2 — Finding the Bottleneck](#7-layer-2--finding-the-bottleneck)
+7. [Layer 2 — Identifying the Constraint](#7-layer-2--identifying-the-constraint)
 8. [Layer 3 — The "What-If" Simulation](#8-layer-3--the-what-if-simulation)
 9. [ABM — Checking Your Assumptions](#9-abm--checking-your-assumptions)
 10. [Saving and Loading Your Work](#10-saving-and-loading-your-work)
@@ -38,13 +38,16 @@ but bad at circular thinking.
 Layers helps you:
 
 1. **Draw** the system as a diagram of causes and effects.
-2. **Find** where the bottleneck probably sits (the place a small change
-   would have the biggest ripple).
-3. **Simulate** what would happen to throughput, inventory, and cost if you
-   changed that bottleneck.
-4. **Check** whether your mental model is even right, by simulating
-   individual agents (people, machines, warehouses) and seeing if their
-   collective behavior matches the big picture you drew.
+2. **Identify** where the constraint probably sits — the node whose physical
+   limit governs the whole system's output.
+3. **Exploit and Subordinate** before spending: close the gap to the existing
+   capacity ceiling, and align the rest of the system to protect the constraint.
+4. **Elevate** the constraint when headroom is genuinely exhausted, knowing what
+   it costs in Operating Expense.
+5. **Watch the constraint migrate** after each intervention, and repeat.
+6. **Check** whether your mental model is even right, by simulating
+   individual agents and seeing if their collective behavior matches the big
+   picture you drew.
 
 All of this runs in your browser. There is no server, no login, no
 internet connection required after the page loads. Your data never leaves
@@ -70,7 +73,7 @@ unfamiliar.
 | **Stock**                | A node that accumulates over time — like the water level in a tank. Examples: inventory, backlog, cash balance.                                                                                                                                                                                        |
 | **Flow**                 | A node that is a rate of change — like the faucet filling the tank. Examples: order rate, production rate.                                                                                                                                                                                             |
 | **Auxiliary**            | A helper node that is neither a stock nor a flow — just a converter or constant.                                                                                                                                                                                                                       |
-| **Constraint**           | A bottleneck: a node where many loops converge and delays pile up. Moving a constraint tends to shift the whole system's behavior.                                                                                                                                                                     |
+| **Constraint**           | A node whose physical capacity limits the whole system's output — the node whose upper collar binds under load. Moving the constraint (Step 5 of the Five Focusing Steps) shifts the system's behavior. See [docs/toc-and-ta.md](./docs/toc-and-ta.md).                                                                                                |
 | **T / I / OE**           | Three financial-flavored categories for Layer 3, **derived from the system boundary + topology** (not hand-authored): **T** = Throughput (rate of flow across the system boundary), **I** = Investment / Inventory (total stock mass + in-flight material inside the system), **OE** = Operating Expense (flow through constrained resources inside the system). These come from the Theory of Constraints. |
 | **System boundary**       | The set of nodes that are the system's interface with its environment (market demand, supplier inputs, customer outputs). Authored as `boundary: true` on a node; auto-derived from exogenous nodes (no incoming edges) when no explicit boundary is set. T/I/OE are derived from this inside/outside distinction. |
 | **Heat overlay**         | Coloring the nodes by score — cool blue for low scores, red for high scores — so the likely bottleneck stands out visually.                                                                                                                                                                            |
@@ -86,7 +89,7 @@ unfamiliar.
 | **Perturbation**         | A small change to one agent-level parameter, to test whether the system's big-picture behavior is stable or fragile.                                                                                                                                                                                   |
 | **Bifurcation**          | A tipping point: a small change causes the system to flip into a qualitatively different behavior (e.g., smooth convergence turns into wild oscillation).                                                                                                                                              |
 | **YAML**                 | A simple text format for writing structured data. You author your model in a YAML file; the app reads it and draws the diagram.                                                                                                                                                                        |
-| **Fixture**              | A ready-made example model. The app ships with one: the beer-distribution (bullwhip) model.                                                                                                                                                                                                            |
+| **Fixture**              | A ready-made example model. The app ships with five: see [Example fixtures](#5-the-built-in-example-beer-distribution) below.                                                                                                                                                                          |
 
 ---
 
@@ -460,7 +463,7 @@ is exactly what happens in the beer distribution model.
 
 ---
 
-## 7. Layer 2 — Finding the Bottleneck
+## 7. Layer 2 — Identifying the Constraint
 
 Select **L2: Constraints** in the layer switcher. This is the default
 view when the app opens.
@@ -469,19 +472,20 @@ view when the app opens.
 
 Layer 2 colors and sizes the nodes by a **constraint score** — a number
 from 0 to 1 that estimates how likely each node is to be the system's
-bottleneck. The higher the score, the hotter the color and the bigger the
-node.
+constraint (Step 1 of the Five Focusing Steps). The higher the score, the
+hotter the color and the bigger the node.
 
-This answers the question: **"If I could change one thing in this system,
-which node would have the biggest ripple effect?"**
+This answers the question: **"Which node, if it binds at its physical
+limit, would most limit the whole system's output?"**
 
-The score is a **pure function of the graph and your weights** — it never
-changes as the animation runs, so the ranking is stable and trustworthy. A
-fifth signal, **sensitivity**, measures how much a unit nudge at each node
-perturbs the whole system (computed once from the simulation engine and cached
-until you edit the graph). The four structural signals still describe *where*
-the constraint probably sits; sensitivity tells you *how much it matters* when
-you poke it.
+The score is a **pure function of the graph structure and your weights** —
+it never changes as the animation runs. Changing layers or running the
+simulation does not alter the ranking. A fifth signal, **sensitivity**,
+measures how much a unit nudge at each node perturbs the whole system
+(computed once from the simulation engine and cached until you edit the
+graph). The four structural signals describe *where* the constraint
+probably sits; sensitivity tells you *how much it matters* when the system
+is perturbed.
 
 ### What you see
 

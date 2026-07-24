@@ -1,0 +1,134 @@
+# Agentic Verification Loop — multi-agent execution under backlog pressure.
+#
+# An orchestrator dispatches tasks to worker agents; a verifier checks outputs
+# and routes failures back for rework. The verifier is the collared constraint.
+#
+# Key lesson: a rework loop under a capacity-constrained verifier is
+# self-defeating under speed pressure. Pushing more tasks through the orchestrator
+# increases the rework load on an already-pinned verifier, raising WIP without
+# raising throughput. "Going faster" makes the system slower — a reinforcing loop
+# running directly into a wall.
+#
+# The only sound interventions are:
+#   Exploit — reduce rework fraction (improve task quality before verification).
+#   Subordinate — limit orchestrator dispatch rate to verifier throughput (a rope).
+#   Elevate — add verifier capacity (raises OE).
+#
+# Collar: verifier_capacity is capped at physical throughput. rework_backlog has
+# a lower bound of 0 (can't be negative).
+#
+# Exercises: Phase 4 (Exploit vs Subordinate — Subordinate is the sound move here,
+# not Exploit), Phase 7 (steep utilisation curve at high ρ), Phase 8 (robustness:
+# rework_fraction range declared; constraint identity stable under Monte Carlo).
+
+nodes:
+  - id: task_arrivals
+    label: Task Arrivals
+    type: flow
+    boundary: true
+    initial_value: 60
+    unit: tasks/hour
+
+  - id: dispatch_backlog
+    label: Dispatch Backlog
+    type: stock
+    initial_value: 0
+    unit: tasks
+    collar: { lower: 0 }
+
+  - id: orchestrator_rate
+    label: Orchestrator Dispatch Rate
+    type: flow
+    initial_value: 60
+    unit: tasks/hour
+
+  - id: execution_backlog
+    label: Execution Backlog
+    type: stock
+    initial_value: 20
+    unit: tasks
+    collar: { lower: 0 }
+
+  - id: verifier_capacity
+    label: Verifier Capacity
+    type: stock
+    initial_value: 55
+    unit: tasks/hour
+    collar: { lower: 0, upper: 65, approach: hard }
+    capacity_cost: 8000
+
+  - id: rework_backlog
+    label: Rework Backlog
+    type: stock
+    initial_value: 5
+    unit: tasks
+    collar: { lower: 0 }
+
+  - id: completed_tasks
+    label: Completed Tasks
+    type: flow
+    boundary: true
+    initial_value: 50
+    unit: tasks/hour
+
+edges:
+  - id: e1
+    source: task_arrivals
+    target: dispatch_backlog
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 1
+
+  - id: e2
+    source: dispatch_backlog
+    target: orchestrator_rate
+    polarity: +
+    delay: { type: information, magnitude: 0.5 }
+    strength: 1
+
+  - id: e3
+
+    source: orchestrator_rate
+    target: execution_backlog
+    polarity: +
+    delay: { type: material, magnitude: 1 }
+    strength: 1
+
+  - id: e4
+    source: execution_backlog
+    target: verifier_capacity
+    polarity: +
+    delay: { type: material, magnitude: 1 }
+    strength: 1
+
+  - id: e5
+    source: verifier_capacity
+    target: completed_tasks
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 0.85
+
+  # Rework loop: failed verifications return to execution backlog.
+  - id: e6
+    source: verifier_capacity
+    target: rework_backlog
+    polarity: +
+    delay: { type: material, magnitude: 1 }
+    strength: 0.15
+    range: { strength: [0.10, 0.30] }
+
+  - id: e7
+    source: rework_backlog
+    target: execution_backlog
+    polarity: +
+    delay: { type: material, magnitude: 0.5 }
+    strength: 1
+
+  # Speed pressure: a growing rework backlog signals to orchestrator to slow down.
+  # This is the balancing counterforce; without it the system has no self-correction.
+  - id: e8
+    source: rework_backlog
+    target: orchestrator_rate
+    polarity: "-"
+    delay: { type: information, magnitude: 1 }
+    strength: 0.4

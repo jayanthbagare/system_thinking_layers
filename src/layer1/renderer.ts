@@ -825,7 +825,44 @@ export class Layer1Renderer {
       .force("center", forceCenter(0, 0))
       .alpha(1)
       .alphaDecay(0.04)
-      .on("tick", () => this.tick());
+      .on("tick", () => this.tick())
+      .on("end", () => this.fitZoom());
+  }
+
+  /** Zoom to fit all nodes in the viewport with padding, called once after the
+   * force simulation cools. Gives the graph a comfortable reading scale so
+   * polarity chips and delay numbers are legible without manual zooming. */
+  private fitZoom(): void {
+    if (this.simNodes.length === 0) return;
+    const pad = 80;
+    // Reserve space for the right-side monitor panel (340px wide + 24px margin).
+    const availW = this.opts.width - 380;
+    const availH = this.opts.height;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const n of this.simNodes) {
+      minX = Math.min(minX, n.x - NODE_RADIUS);
+      maxX = Math.max(maxX, n.x + NODE_RADIUS);
+      minY = Math.min(minY, n.y - NODE_RADIUS);
+      maxY = Math.max(maxY, n.y + NODE_RADIUS);
+    }
+    const graphW = maxX - minX + pad * 2;
+    const graphH = maxY - minY + pad * 2;
+    const scale = Math.min(
+      availW / graphW,
+      availH / graphH,
+      2,  // don't zoom in past 2× even on tiny graphs
+    );
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    // Center in the available area (left of the monitor panel).
+    const offsetX = availW / 2;
+    this.svg.call(
+      this.zoomBehavior.transform,
+      zoomIdentity
+        .translate(offsetX, this.opts.height / 2)
+        .scale(scale)
+        .translate(-cx, -cy),
+    );
   }
 
   private tick(): void {

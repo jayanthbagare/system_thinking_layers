@@ -1,0 +1,143 @@
+# CI/CD Pipeline — code review as the collared constraint.
+#
+# Commits flow through build, review, and deploy. Code review is collared at
+# team capacity. This is the canonical case where Elevate (hire more reviewers)
+# is frequently worse than Subordinate (limit WIP to review throughput via a
+# pull-based merge queue).
+#
+# Key lesson: adding more reviewers (Elevate) raises OE and shifts the
+# constraint to build or deploy, but does not necessarily improve cycle time if
+# the root cause is large batch sizes feeding the review queue. Subordinate —
+# a negative-polarity edge from review_backlog back to commit_rate — limits
+# developer context-switching and reduces batch size, improving T without
+# raising OE.
+#
+# Demonstrates constraint migration after Elevate: review_capacity binds first;
+# after elevation the constraint migrates to deploy_capacity (or build_capacity
+# if build queue grows), demonstrating Step 5 of the Five Focusing Steps.
+#
+# Collar: review_capacity is the drum, deploy_capacity has a soft collar
+# (deployment windows create a smooth rolloff near the ceiling).
+#
+# Exercises: Phase 4 (Subordinate vs Elevate comparison), Phase 5 (constraint
+# migration trail), Phase 6 (structural intervention: add WIP-limit rope edge),
+# Phase 9 (scenario tray: compare Subordinate and Elevate side by side).
+
+nodes:
+  - id: commit_rate
+    label: Commit Rate
+    type: flow
+    boundary: true
+    initial_value: 40
+    unit: commits/day
+
+  - id: build_queue
+    label: Build Queue
+    type: stock
+    initial_value: 5
+    unit: commits
+    collar: { lower: 0 }
+
+  - id: build_capacity
+    label: Build Capacity
+    type: stock
+    initial_value: 38
+    unit: commits/day
+    collar: { lower: 0, upper: 50 }
+    capacity_cost: 200
+
+  - id: review_queue
+    label: Review Queue
+    type: stock
+    initial_value: 12
+    unit: commits
+    collar: { lower: 0 }
+
+  - id: review_capacity
+    label: Review Capacity (Constraint)
+    type: stock
+    initial_value: 22
+    unit: commits/day
+    collar: { lower: 0, upper: 25, approach: hard }
+    capacity_cost: 1800
+
+  - id: deploy_queue
+    label: Deploy Queue
+    type: stock
+    initial_value: 3
+    unit: commits
+    collar: { lower: 0 }
+
+  - id: deploy_capacity
+    label: Deploy Capacity
+    type: stock
+    initial_value: 30
+    unit: commits/day
+    collar: { lower: 0, upper: 35, approach: soft }
+    capacity_cost: 400
+
+  - id: shipped_commits
+    label: Shipped Commits
+    type: flow
+    boundary: true
+    initial_value: 22
+    unit: commits/day
+
+edges:
+  - id: e1
+    source: commit_rate
+    target: build_queue
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 1
+
+  - id: e2
+    source: build_queue
+    target: build_capacity
+    polarity: +
+    delay: { type: material, magnitude: 0.25 }
+    strength: 1
+
+  - id: e3
+    source: build_capacity
+    target: review_queue
+    polarity: +
+    delay: { type: material, magnitude: 0.1 }
+    strength: 1
+
+  - id: e4
+    source: review_queue
+    target: review_capacity
+    polarity: +
+    delay: { type: material, magnitude: 1 }
+    strength: 1
+
+  - id: e5
+    source: review_capacity
+    target: deploy_queue
+    polarity: +
+    delay: { type: material, magnitude: 0.1 }
+    strength: 1
+
+  - id: e6
+    source: deploy_queue
+    target: deploy_capacity
+    polarity: +
+    delay: { type: material, magnitude: 0.5 }
+    strength: 1
+
+  - id: e7
+    source: deploy_capacity
+    target: shipped_commits
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 1
+
+  # Review-queue pressure amplifies commit rate (developers push harder when PRs age).
+  - id: e8
+    source: review_queue
+    target: commit_rate
+    polarity: +
+    delay: { type: perception, magnitude: 2 }
+    strength: 0.3
+    range: { strength: [0.1, 0.5] }

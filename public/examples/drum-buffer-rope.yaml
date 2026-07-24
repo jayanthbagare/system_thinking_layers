@@ -1,0 +1,105 @@
+# Drum-Buffer-Rope (DBR) — Theory of Constraints control archetype.
+#
+# The constraint (drum) sets the pace. A time buffer protects it from starvation.
+# The rope ties release of raw material to the drum's consumption rate, preventing
+# upstream work-in-process from overwhelming the constraint.
+#
+# Key lesson: remove the rope and the reinforcing bullwhip loop produces
+# oscillation identical to the beer distribution model. The rope is the only
+# negative-polarity information edge; it is the structural mechanism that converts
+# an amplifying loop into a controlled one.
+#
+# Collar: production_capacity is the drum — collared at physical capacity.
+# Exploit-vs-Elevate is directly demonstrable: with 5% headroom remaining,
+# Exploit closes that gap (T up, OE flat); Elevate moves the collar (T up, OE up).
+#
+# Exercises: Phase 4 (typed interventions, headroom cap), Phase 5 (constraint
+# migration after Elevate), Phase 7 (utilisation curve, ρ = current/upper).
+
+nodes:
+  - id: market_demand
+    label: Market Demand
+    type: flow
+    boundary: true
+    initial_value: 80
+    unit: units/week
+
+  - id: raw_material_buffer
+    label: Raw Material Buffer
+    type: stock
+    initial_value: 160
+    unit: units
+    collar: { lower: 0 }
+
+  - id: release_rate
+    label: Release Rate
+    type: flow
+    initial_value: 80
+    unit: units/week
+
+  - id: wip_buffer
+    label: WIP Buffer
+    type: stock
+    initial_value: 40
+    unit: units
+    collar: { lower: 0 }
+
+  - id: production_capacity
+    label: Production Capacity (Drum)
+    type: stock
+    initial_value: 80
+    unit: units/week
+    collar: { lower: 0, upper: 84, approach: hard }
+    capacity_cost: 6000
+
+  - id: shipped_throughput
+    label: Shipped Throughput
+    type: flow
+    boundary: true
+    initial_value: 80
+    unit: units/week
+
+edges:
+  - id: e1
+    source: market_demand
+    target: raw_material_buffer
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 1
+
+  - id: e2
+    source: release_rate
+    target: wip_buffer
+    polarity: +
+    delay: { type: material, magnitude: 1 }
+    strength: 1
+
+  - id: e3
+    source: wip_buffer
+    target: production_capacity
+    polarity: +
+    delay: { type: material, magnitude: 1 }
+    strength: 1
+
+  - id: e4
+    source: production_capacity
+    target: shipped_throughput
+    polarity: +
+    delay: { type: none, magnitude: 0 }
+    strength: 1
+
+  # The rope: drum consumption pulls release rate, tying upstream to constraint pace.
+  # Remove this edge to reproduce the bullwhip.
+  - id: e5
+    source: production_capacity
+    target: release_rate
+    polarity: +
+    delay: { type: information, magnitude: 1 }
+    strength: 1
+
+  - id: e6
+    source: raw_material_buffer
+    target: release_rate
+    polarity: +
+    delay: { type: information, magnitude: 1 }
+    strength: 0.8
