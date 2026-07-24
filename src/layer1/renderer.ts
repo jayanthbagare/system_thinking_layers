@@ -478,7 +478,8 @@ export class Layer1Renderer {
         if (node) {
           const u = age / NUDGE_RING_MS;
           const r = NODE_RADIUS + 6 + u * 24;
-          const opacity = (1 - u) * 0.8;
+          // Hold full opacity for first third, then fade out.
+          const opacity = u < 0.33 ? 0.8 : (1 - u) * 1.2 * 0.8;
           layer
             .append("circle")
             .attr("class", "nudge-ring")
@@ -503,7 +504,8 @@ export class Layer1Renderer {
         const eased = 1 - Math.pow(1 - frac, 2);
         const x = e.source.x + (e.target.x - e.source.x) * eased;
         const y = e.source.y + (e.target.y - e.source.y) * eased;
-        const opacity = (1 - frac) * 0.95;
+        // Stay fully opaque during travel; only fade in the final 25%.
+        const opacity = frac > 0.75 ? (1 - frac) * 4 * 0.95 : 0.95;
         layer
           .append("circle")
           .attr("class", "signal nudge-pulse")
