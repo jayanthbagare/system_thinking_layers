@@ -65,9 +65,18 @@ const TIOE_META: { key: "T" | "I" | "OE"; label: string; description: string }[]
 /** "raw" = canvas nudge probe (untyped impulse); "typed" = a ToC intervention. */
 type PanelMode = "raw" | "typed";
 
+/** Options for the Layer 3 panel constructor. */
+export interface Layer3PanelOptions {
+  /** Notified when the user applies an intervention (Phase 5). Receives the
+   * typed intervention so the host can persist it to the working graph and
+   * record a migration step. */
+  onApply?: (iv: TypedIntervention) => void;
+}
+
 export class Layer3Panel {
   private readonly host: HTMLElement;
   private readonly graph: Graph;
+  private readonly onApply: ((iv: TypedIntervention) => void) | undefined;
   private nodeId: string;
   private weights: Weights = { ...DEFAULT_WEIGHTS };
   /** Once the user picks a node from the dropdown, stop auto-following L2. */
@@ -88,9 +97,10 @@ export class Layer3Panel {
 
   private active = false;
 
-  constructor(host: HTMLElement, graph: Graph) {
+  constructor(host: HTMLElement, graph: Graph, opts: Layer3PanelOptions = {}) {
     this.host = host;
     this.graph = graph;
+    this.onApply = opts.onApply;
     this.host.classList.add("layer3-panel");
     // Default to the Layer 2 top-ranked constraint as the intervention node —
     // the spec frames Layer 3 as "what moving the constraint does." Re-derived
@@ -278,6 +288,30 @@ export class Layer3Panel {
     });
     methodRow.append(methodLabel, methodGroup);
     wrap.append(methodRow);
+
+    // Apply button (Phase 5): persists the current typed intervention to the
+    // working graph so the constraint is re-scored post-intervention. The
+    // raw-impulse nudge mode has no "apply" — it is a probe, not a change.
+    const applyRow = document.createElement("div");
+    applyRow.className = "layer3-control layer3-apply-row";
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.textContent = "Apply intervention";
+    applyBtn.className = "layer3-apply-btn";
+    applyBtn.dataset.role = "apply";
+    applyBtn.disabled = this.mode !== "typed";
+    applyBtn.addEventListener("click", () => {
+      if (this.mode !== "typed" || !this.onApply) return;
+      const iv: TypedIntervention = {
+        type: this.type,
+        target: this.nodeId,
+        magnitude: this.magnitude,
+        ...(this.type === "subordinate" ? { rope: this.rope } : {}),
+      };
+      this.onApply(iv);
+    });
+    applyRow.append(applyBtn);
+    wrap.append(applyRow);
 
     return wrap;
   }
@@ -657,6 +691,8 @@ export class Layer3Panel {
   private syncModeToggle(): void {
     const rope = this.host.querySelector<HTMLElement>('[data-role="rope"]');
     if (rope) rope.style.display = this.mode === "typed" && this.type === "subordinate" ? "" : "none";
+    const applyBtn = this.host.querySelector<HTMLButtonElement>('[data-role="apply"]');
+    if (applyBtn) applyBtn.disabled = this.mode !== "typed";
   }
 
   /** Clamp the current magnitude into the active slider's range (exploit cap). */

@@ -56,6 +56,14 @@ export interface SimNode {
   pinned: boolean;
 }
 
+/** Phase 5 migration arc: a dashed path from the previous constraint to the new. */
+export interface MigrationArc {
+  from: string;
+  to: string;
+  /** 0..1, 1 = most recent (full opacity). Older arcs fade. */
+  recency: number;
+}
+
 /** An edge as consumed by the simulation link force. */
 export interface SimEdge {
   id: string;
@@ -127,6 +135,7 @@ export class Layer1Renderer {
   private readonly signalLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly nodeLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly labelLayer: Selection<SVGGElement, unknown, null, unknown>;
+  private readonly migrationLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly zoomBehavior: ZoomBehavior<SVGSVGElement, unknown>;
 
   private graph: Graph | null = null;
@@ -137,6 +146,8 @@ export class Layer1Renderer {
   private activeLoopId: string | null = null;
   /** Layer 2 heat overlay: node id -> score in [0,1]. null = no overlay. */
   private heat: Map<string, number> | null = null;
+  /** Phase 5 migration arcs: from/to node ids + recency (1 = most recent). */
+  private migrationArcs: MigrationArc[] = [];
   private readonly opts: RendererOptions;
 
   /**
@@ -176,6 +187,7 @@ export class Layer1Renderer {
     this.linkLayer = this.root.append("g").attr("class", "layer1-links");
     this.signalLayer = this.root.append("g").attr("class", "layer1-signals");
     this.labelLayer = this.root.append("g").attr("class", "layer1-loop-labels");
+    this.migrationLayer = this.root.append("g").attr("class", "layer1-migration");
     this.nodeLayer = this.root.append("g").attr("class", "layer1-nodes");
 
     this.zoomBehavior = zoom<SVGSVGElement, unknown>()
@@ -236,6 +248,16 @@ export class Layer1Renderer {
   applyHeat(scores: Map<string, number> | null): void {
     this.heat = scores;
     this.styleNodesForHeat();
+  }
+
+  /**
+   * Draw Phase 5 migration arcs: dashed curved paths from the previous
+   * constraint node to the new one, faded by recency (most recent = full
+   * opacity, older = faded). Pass an empty array to clear.
+   */
+  drawMigrationArcs(arcs: MigrationArc[]): void {
+    this.migrationArcs = arcs;
+    this.renderMigrationArcs();
   }
 
   /** Tear down: stop the simulation and remove DOM listeners. */
@@ -341,6 +363,41 @@ export class Layer1Renderer {
       el.setAttribute("cx", String(sx));
       el.setAttribute("cy", String(sy));
       el.setAttribute("data-sign", d.sign);
+    });
+  }
+
+  /** Render migration arcs as dashed curved paths, faded by recency. */
+  private renderMigrationArcs(): void {
+    if (!this.graph) return;
+    const byId = new Map(this.simNodes.map((n) => [n.id, n]));
+    const arcs = this.migrationArcs.filter((a) => byId.has(a.from) && byId.has(a.to));
+    const sel = this.migrationLayer
+      .selectAll<SVGPathElement, MigrationArc>("path.migration-arc")
+      .data(arcs, (d) => `${d.from}->${d.to}`);
+    sel.exit().remove();
+    const enter = sel
+      .enter()
+      .append("path")
+      .attr("class", "migration-arc");
+    enter.merge(sel).each((d, i, groups) => {
+      const from = byId.get(d.from)!;
+      const to = byId.get(d.to)!;
+      if (from.id === to.id) return;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) return;
+      // Quadratic curve with perpendicular offset for a visible arc.
+      const mx = (from.x + to.x) / 2;
+      const my = (from.y + to.y) / 2;
+      const offset = Math.min(60, dist * 0.2);
+      const nx = -dy / dist;
+      const ny = dx / dist;
+      const cx = mx + nx * offset;
+      const cy = my + ny * offset;
+      const el = groups[i];
+      el.setAttribute("d", `M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`);
+      el.setAttribute("opacity", String(0.2 + 0.6 * d.recency));
     });
   }
 
@@ -623,6 +680,7 @@ export class Layer1Renderer {
     this.drawEdges();
     this.drawNodes();
     this.drawLoopLabels();
+    this.renderMigrationArcs();
   }
 
   private draw(): void {

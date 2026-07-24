@@ -11,12 +11,14 @@
 
 import { parseGraphOrThrow } from "@/dsl/parser";
 import { withComputedLoops } from "@/graph/loops";
-import { Layer1Renderer } from "@/layer1";
-import { Layer2Panel } from "@/layer2";
+import { Layer1Renderer, type MigrationArc } from "@/layer1";
+import { Layer2Panel, type MigrationTrail, recordMigrationStep } from "@/layer2";
 import { Layer3Panel } from "@/layer3";
+import type { TypedIntervention } from "@/layer3";
 import { AbmPanel } from "@/abm";
 import { LayerSwitcher, type LayerControl } from "@/ui";
 import { downloadSession, downloadGraphYaml, uploadSession } from "@/io";
+import { DEFAULT_ENGINE_OPTIONS } from "@/sim";
 import type { DEFAULT_WEIGHTS } from "@/layer2/scoring";
 import type { Node } from "@/model/types";
 import type { NodeEditPatch } from "@/layer1";
@@ -153,7 +155,43 @@ function main(): void {
   l3Host.setAttribute("aria-label", "T/I/OE simulation");
   l3Host.className = "side-panel side-panel--l3";
   root.append(l3Host);
-  const l3 = new Layer3Panel(l3Host, graph);
+  // Phase 5 migration trail — the ordered list of applied interventions.
+  let migrationTrail: MigrationTrail = [];
+  const l3 = new Layer3Panel(l3Host, graph, {
+    onApply: (iv: TypedIntervention) => {
+      // Record the migration step (computes before/after constraints + deltas).
+      const sens = l2.getSensitivities();
+      const { nextGraph, step } = recordMigrationStep(
+        graph,
+        iv,
+        DEFAULT_ENGINE_OPTIONS,
+        weights,
+        sens,
+        500,
+      );
+      step.index = migrationTrail.length;
+      migrationTrail = [...migrationTrail, step];
+      // Apply the new graph to the working Graph in place.
+      graph.nodes = nextGraph.nodes;
+      graph.edges = nextGraph.edges;
+      graph.loops = nextGraph.loops;
+      // Re-render and refresh panels.
+      renderer.render(graph);
+      l2.invalidate();
+      l2.setWeights(weights);
+      l2.setMigrationTrail(migrationTrail);
+      // Draw migration arcs on the canvas (observed constraint movement).
+      const arcs: MigrationArc[] = migrationTrail
+        .filter((s) => s.observedBefore && s.observedAfter && s.observedBefore !== s.observedAfter)
+        .map((s, i) => ({
+          from: s.observedBefore!,
+          to: s.observedAfter!,
+          recency: (i + 1) / migrationTrail.length,
+        }));
+      renderer.drawMigrationArcs(arcs);
+      downloadGraphYaml(graph);
+    },
+  });
 
   const abmHost = document.createElement("aside");
   abmHost.setAttribute("aria-label", "ABM companion view");

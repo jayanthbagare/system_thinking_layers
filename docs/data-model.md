@@ -151,3 +151,28 @@ ratios (ΔT/ΔOE, ΔT/ΔI, ΔT per unit of constraint time, payback horizon), th
 J-curve (worse-before-better depth and duration), and the degrees-of-freedom
 change. The L1 canvas nudge remains a raw impulse probe (the Phase 1 bridge),
 separate from the typed selector.
+
+## Layer 2 — constraint migration: predicted vs observed (Phase 5)
+
+Step 5 of the Five Focusing Steps is "go back to step 1." After an intervention
+the constraint relocates. Layer 2 now shows two constraint identities:
+
+- **Predicted** — L2's #1 ranked node from the structural score (a heuristic).
+- **Observed** — the node with the highest fraction of run time pinned at its
+  upper collar under current load (a dynamical measurement).
+
+Agreement is earned confidence in the heuristic. Disagreement is the finding,
+stated plainly — the score is weighting structure the dynamics do not bear out.
+The score is **never auto-corrected** to match the observation (spec §5.1).
+
+When an intervention is **applied** (L3 → Apply button), it is persisted to the
+working graph and a migration step is recorded. The step captures the predicted
+and observed constraint before and after, plus ΔT, ΔOE, ΔDoF. The migration
+trail (see `src/layer2/migration.ts`) renders compactly in the L2 panel, with
+dashed arcs drawn on the L1 canvas from the previous constraint to the new,
+faded by recency.
+
+**Cycle detection** fires when the observed constraint returns to a node already
+in the trail: *"Cycle detected: two elevations, net ΔT ≈ 0, ΔOE +X. The
+constraint returned to where it started."* This is the payload of the whole
+feature — the most under-internalised idea in ToC.

@@ -1,5 +1,5 @@
 export { Layer1Renderer } from "./renderer";
-export type { RendererOptions, SimEdge, SimNode } from "./renderer";
+export type { RendererOptions, SimEdge, SimNode, MigrationArc } from "./renderer";
 export { openEditModal } from "./editModal";
 export type { NodeEditPatch } from "./editModal";
 export {

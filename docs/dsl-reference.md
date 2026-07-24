@@ -89,6 +89,14 @@ the TA decision ratios (ΔT/ΔOE, ΔT/ΔI, ΔT per constraint time, payback
 horizon), the J-curve (worse-before-better depth/duration), and the
 degrees-of-freedom change. See `src/layer3/intervention.ts`.
 
+**Applying an intervention** (Phase 5) persists it to the working graph —
+Exploit updates `initial_value`, Subordinate adds the rope edge, Elevate moves
+the collar — and records a migration step. Layer 2 then re-scores both the
+*predicted* constraint (L2 structural #1) and the *observed* constraint (the
+node pinned most at its upper collar under load). If either moved, the trail
+records the transition; if the constraint returns to a prior node, a cycle is
+detected. See `src/layer2/migration.ts`.
+
 ## Edge fields
 
 | Field | Required | Type | Default |

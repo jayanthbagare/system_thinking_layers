@@ -15,8 +15,17 @@
 
 import type { Graph } from "@/model/types";
 import { scoreGraph, DEFAULT_WEIGHTS, type ScoredNode, type Weights } from "@/layer2/scoring";
+import {
+  observedConstraint,
+  detectCycle,
+  stepSummary,
+  disagreementMessage,
+  type MigrationTrail,
+  type CycleDetection,
+} from "@/layer2/migration";
 import { heatColor } from "@/layer1/layout";
 import { normalizedSensitivities } from "@/sim";
+import { DEFAULT_ENGINE_OPTIONS, type EngineOptions } from "@/sim";
 import type { Layer1Renderer } from "@/layer1/renderer";
 
 const DEBOUNCE_MS = 80; // comfortably under the 100ms acceptance budget
@@ -52,6 +61,11 @@ export class Layer2Panel {
   private sensitivities: Map<string, number> | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
+  /** Phase 5 migration trail — the ordered list of applied interventions and
+   * the constraint's movement. Maintained externally (main.ts) and passed in
+   * via `setMigrationTrail`. Rendered as a compact list; cycles flagged. */
+  private migrationTrail: MigrationTrail = [];
+  private cycle: CycleDetection | null = null;
 
   constructor(
     host: HTMLElement,
@@ -96,6 +110,13 @@ export class Layer2Panel {
     this.recompute();
   }
 
+  /** Replace the migration trail and re-render the trail + cycle sections. */
+  setMigrationTrail(trail: MigrationTrail): void {
+    this.migrationTrail = trail;
+    this.cycle = detectCycle(trail);
+    this.refreshMigration();
+  }
+
   /**
    * Invalidate the cached sensitivities, e.g. after the graph is edited (a
    * node added/removed, an edge changed, a collar moved). The next `recompute`
@@ -103,6 +124,11 @@ export class Layer2Panel {
    */
   invalidate(): void {
     this.sensitivities = null;
+  }
+
+  /** Expose the cached sensitivities (computing if needed) for external use. */
+  getSensitivities(): Map<string, number> {
+    return this.ensureSensitivities();
   }
 
   /** Lazily compute (and cache) the engine-derived sensitivities. */
@@ -120,6 +146,8 @@ export class Layer2Panel {
     this.host.append(this.renderHeader());
     this.host.append(this.renderSliders());
     this.host.append(this.renderRanking());
+    this.host.append(this.renderPredictedVsObserved());
+    this.host.append(this.renderMigration());
   }
 
   private renderHeader(): HTMLElement {
@@ -249,7 +277,8 @@ export class Layer2Panel {
    */
   private recomputeLive(): void {
     if (!this.active) return;
-    const { ranked } = scoreGraph(this.graph, this.weights, this.ensureSensitivities());
+    const sens = this.ensureSensitivities();
+    const { ranked } = scoreGraph(this.graph, this.weights, sens);
     // Apply heat to the canvas (no layout re-run).
     const scores = new Map<string, number>(ranked.map((r) => [r.nodeId, r.score]));
     this.renderer.applyHeat(scores);
@@ -261,6 +290,133 @@ export class Layer2Panel {
       if (caption) section.append(caption);
       ranked.slice(0, this.topK).forEach((sn, i) => section.append(this.renderRankedCard(sn, i + 1)));
     }
+    // Refresh the predicted-vs-observed section (Phase 5).
+    this.updatePredictedVsObserved(ranked[0]?.nodeId ?? null);
+  }
+
+  // --- predicted vs observed (Phase 5 §5.1) -----------------------------
+
+  private renderPredictedVsObserved(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "layer2-pred-obs";
+    section.dataset.role = "pred-obs";
+    return section;
+  }
+
+  private updatePredictedVsObserved(predictedId: string | null): void {
+    const section = this.host.querySelector<HTMLElement>('[data-role="pred-obs"]');
+    if (!section) return;
+    const engOpts: EngineOptions = DEFAULT_ENGINE_OPTIONS;
+    const obs = observedConstraint(this.graph, engOpts, 500);
+    const predictedLabel = this.labelOf(predictedId);
+    const observedLabel = this.labelOf(obs.nodeId);
+    const agree = predictedId && obs.nodeId && predictedId === obs.nodeId;
+
+    section.innerHTML = "";
+
+    const title = document.createElement("p");
+    title.className = "layer2-caption";
+    title.textContent = "Constraint: predicted vs observed";
+    section.append(title);
+
+    const predRow = document.createElement("div");
+    predRow.className = "layer2-pred-obs-row";
+    const predLabel = document.createElement("span");
+    predLabel.textContent = "Predicted (L2 #1):";
+    const predVal = document.createElement("span");
+    predVal.textContent = predictedLabel;
+    predVal.classList.toggle("is-agree", !!agree);
+    predVal.classList.toggle("is-disagree", !agree && !!predictedId && !!obs.nodeId);
+    predRow.append(predLabel, predVal);
+    section.append(predRow);
+
+    const obsRow = document.createElement("div");
+    obsRow.className = "layer2-pred-obs-row";
+    const obsLabel = document.createElement("span");
+    obsLabel.textContent = "Observed (pinned %):";
+    const obsVal = document.createElement("span");
+    obsVal.textContent = observedLabel + (obs.nodeId ? ` (${(obs.fraction * 100).toFixed(0)}%)` : "");
+    obsVal.classList.toggle("is-agree", !!agree);
+    obsVal.classList.toggle("is-disagree", !agree && !!predictedId && !!obs.nodeId);
+    obsRow.append(obsLabel, obsVal);
+    section.append(obsRow);
+
+    const msg = disagreementMessage(this.graph, predictedId, obs.nodeId);
+    if (msg) {
+      const note = document.createElement("p");
+      note.className = "layer2-disagreement";
+      note.textContent = msg;
+      section.append(note);
+    } else if (agree) {
+      const note = document.createElement("p");
+      note.className = "layer2-agreement";
+      note.textContent = "Predicted and observed agree.";
+      section.append(note);
+    }
+  }
+
+  // --- migration trail (Phase 5 §5.3–5.4) -------------------------------
+
+  private renderMigration(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "layer2-migration";
+    section.dataset.role = "migration";
+    this.populateMigration(section);
+    return section;
+  }
+
+  /** Re-render the migration trail + cycle sections in place. */
+  private refreshMigration(): void {
+    const section = this.host.querySelector<HTMLElement>('[data-role="migration"]');
+    if (section) this.populateMigration(section);
+  }
+
+  private populateMigration(section: HTMLElement): void {
+    section.innerHTML = "";
+    const title = document.createElement("p");
+    title.className = "layer2-caption";
+    title.textContent = "Migration trail";
+    section.append(title);
+
+    if (this.migrationTrail.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "layer2-migration-empty";
+      empty.textContent = "No interventions applied yet. Use Layer 3 → Apply.";
+      section.append(empty);
+      return;
+    }
+
+    this.migrationTrail.forEach((step, i) => {
+      const row = document.createElement("div");
+      row.className = "layer2-migration-step";
+      row.style.setProperty("--recency", String((i + 1) / this.migrationTrail.length));
+      const idx = document.createElement("span");
+      idx.className = "layer2-migration-idx";
+      idx.textContent = `#${i + 1}`;
+      const text = document.createElement("span");
+      text.className = "layer2-migration-text";
+      text.textContent = stepSummary(step, this.graph);
+      row.append(idx, text);
+      section.append(row);
+    });
+
+    if (this.cycle && this.cycle.detected) {
+      const alert = document.createElement("div");
+      alert.className = "layer2-cycle-alert";
+      const node = this.labelOf(this.cycle.node);
+      const dT = this.cycle.netDeltaT;
+      const dOE = this.cycle.netDeltaOE;
+      alert.textContent =
+        `Cycle detected: ${this.cycle.length} intervention${this.cycle.length > 1 ? "s" : ""}, ` +
+        `net ΔT ${dT >= 0 ? "+" : ""}${dT.toFixed(1)}, ΔOE ${dOE >= 0 ? "+" : ""}${dOE.toFixed(1)}. ` +
+        `The constraint returned to ${node}.`;
+      section.append(alert);
+    }
+  }
+
+  private labelOf(id: string | null): string {
+    if (!id) return "—";
+    return this.graph.nodes.find((n) => n.id === id)?.label ?? id;
   }
 
   private syncSliderValues(): void {
