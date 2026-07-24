@@ -153,6 +153,26 @@ body {
   fill: var(--c-balancing);
 }
 
+/* Nudge feedback: an expanding "ping" ring on the nudged node, and a traveling
+   dot on each outgoing edge. Slow motion is driven by the renderer (fewer
+   engine steps per frame), these are the visible cues. */
+.nudge-ring {
+  fill: none;
+  stroke-width: 2.5;
+  pointer-events: none;
+}
+.nudge-ring[data-dir="1"] {
+  stroke: var(--c-reinforcing);
+}
+.nudge-ring[data-dir="-1"] {
+  stroke: var(--c-balancing);
+}
+.signal.nudge-pulse {
+  stroke: #fff;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
 /* Loop labels */
 .loop-label-text {
   font-size: 14px;

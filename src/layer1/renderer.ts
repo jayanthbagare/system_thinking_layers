@@ -84,6 +84,21 @@ const ANIM_INTEGRATOR: EngineOptions["integrator"] = "rk4";
 /** A nudge is 10% of the node's operating-point scale, so it is visible relative
  * to the node's own magnitude regardless of units. */
 const NUDGE_FRACTION = 0.1;
+/** After a nudge the live animation runs in slow motion so the impulse is
+ * watchable as it propagates, easing back to full speed over this window. */
+const NUDGE_SLOW_MS = 1600;
+/** Floor of the post-nudge time-scale (the deepest slow-down). The actual depth
+ * is set proportionally to the nudge's fraction of the node's operating scale,
+ * so a standard 10% nudge reaches this floor; bigger relative nudges stay
+ * slower for longer. */
+const NUDGE_SLOW_FLOOR = 0.1;
+/** A nudge pulse crosses an edge in this many engine steps. Tied to the (scaled)
+ * engine, so the pulse slows down with the slow motion. */
+const NUDGE_PULSE_STEPS = 10;
+/** Wall-clock lifetime of the nudge "ping" ring on the node. Decoupled from the
+ * engine so the ring plays even on undelayed graphs and flow nodes, where the
+ * impulse itself has no persistent visual. */
+const NUDGE_RING_MS = 650;
 const HIGHLIGHTED_CLASS = "is-highlighted";
 const DIMMED_CLASS = "is-dimmed";
 
@@ -175,6 +190,20 @@ export class Layer1Renderer {
   private static readonly HISTORY_CAP = 200;
   /** Show a sparkline per node when the graph is small enough to fit. */
   private static readonly ALL_NODES_THRESHOLD = 7;
+
+  /** Post-nudge slow motion: the live loop steps the engine at a fractional
+   * rate (`timeScale`), accumulated in `stepAcc`. 1 = full speed; <1 = slow.
+   * Eased back to 1 over `NUDGE_SLOW_MS` so the nudge's propagation is visible. */
+  private timeScale = 1;
+  private stepAcc = 0;
+  private slowStart = 0;
+  private slowStrength = 0;
+  /** Transient nudge feedback (pure view state, never written to `Graph`):
+   * a decaying "ping" ring on the nudged node, plus a traveling dot on each of
+   * its outgoing edges so the impulse's direction is seen even on undelayed
+   * graphs where the engine has no delay-queue pulses. */
+  private nudgeRing: { nodeId: string; dir: number; start: number } | null = null;
+  private nudgePulses: { edgeId: string; dir: number; age: number }[] = [];
 
   constructor(svg: SVGSVGElement, opts: RendererOptions) {
     this.opts = opts;
@@ -286,8 +315,14 @@ export class Layer1Renderer {
     this.engine?.reset();
     this.histories = new Map();
     this.cumulative = new Map();
+    this.timeScale = 1;
+    this.stepAcc = 0;
+    this.slowStrength = 0;
+    this.nudgeRing = null;
+    this.nudgePulses = [];
     this.buildMonitor();
     this.drawSignals();
+    this.drawNudgeFx(performance.now());
     this.styleNodeValues();
   }
 
@@ -302,11 +337,25 @@ export class Layer1Renderer {
     if (!this.graph || !this.engine) return;
     const tick = (): void => {
       if (!this.playing || !this.graph || !this.engine) return;
-      this.engine.step();
+      const now = performance.now();
+      this.updateTimeScale(now);
+      // Advance the engine by a fractional number of steps each frame, so a
+      // sub-1 timeScale plays the simulation in slow motion (the post-nudge
+      // transient becomes watchable instead of flashing past in one frame).
+      this.stepAcc += this.timeScale;
+      let n = Math.floor(this.stepAcc);
+      this.stepAcc -= n;
+      if (n > 4) {
+        this.stepAcc += n - 4;
+        n = 4;
+      }
+      for (let i = 0; i < n; i++) this.engine.step();
+      this.advanceNudgePulses(n);
       this.drawSignals();
+      this.drawNudgeFx(now);
       this.styleNodeValues();
       this.styleNodesForHeat();
-      this.stepMonitor();
+      if (n > 0) this.stepMonitor();
       if (this.opts.onStep) {
         this.opts.onStep(
           degreesOfFreedom(this.graph, this.engine.state),
@@ -364,6 +413,108 @@ export class Layer1Renderer {
       el.setAttribute("cy", String(sy));
       el.setAttribute("data-sign", d.sign);
     });
+  }
+
+  /**
+   * Seed the post-nudge slow motion and the transient nudge feedback (a ping
+   * ring on the node plus a traveling dot on each outgoing edge). The slow
+   * depth is proportional to the nudge's fraction of the node's operating
+   * scale, so a standard 10% nudge slows fully and a relatively larger nudge
+   * stays slower for longer. Pure view state — it never touches `Graph`.
+   */
+  private beginNudgeFx(nodeId: string, dir: number, delta: number): void {
+    if (!this.graph) return;
+    const now = performance.now();
+    const scale = Math.max(Math.abs(this.equilib?.[nodeId] ?? 0), Math.abs(this.initialOf(nodeId)), 1);
+    const frac = Math.min(1, Math.abs(delta) / scale / NUDGE_FRACTION);
+    this.slowStrength = frac;
+    this.slowStart = now;
+    this.updateTimeScale(now);
+    this.nudgeRing = { nodeId, dir, start: now };
+    this.nudgePulses = this.graph.edges
+      .filter((e) => e.source === nodeId)
+      .map((e) => ({ edgeId: e.id, dir, age: 0 }));
+  }
+
+  /** Ease the post-nudge time-scale back up to 1 (full speed) along an
+   * ease-out curve over `NUDGE_SLOW_MS`, proportionally to the slow depth. */
+  private updateTimeScale(now: number): void {
+    if (this.slowStrength <= 0) {
+      this.timeScale = 1;
+      return;
+    }
+    const elapsed = now - this.slowStart;
+    if (elapsed >= NUDGE_SLOW_MS) {
+      this.slowStrength = 0;
+      this.timeScale = 1;
+      return;
+    }
+    const u = elapsed / NUDGE_SLOW_MS;
+    const minScale = 1 - this.slowStrength * (1 - NUDGE_SLOW_FLOOR);
+    const eased = 1 - Math.pow(1 - u, 3);
+    this.timeScale = minScale + (1 - minScale) * eased;
+  }
+
+  /** Advance nudge pulses by the engine steps taken this frame, dropping any
+   * that have reached the far node. Tied to the (scaled) engine so the dots
+   * slow down with the slow motion. */
+  private advanceNudgePulses(steps: number): void {
+    if (steps <= 0 || this.nudgePulses.length === 0) return;
+    for (const p of this.nudgePulses) p.age += steps;
+    this.nudgePulses = this.nudgePulses.filter((p) => p.age < NUDGE_PULSE_STEPS);
+  }
+
+  /**
+   * Draw the nudge feedback onto the signal layer: an expanding, fading "ping"
+   * ring on the nudged node (wall-clock, so it always plays — even on flow nodes
+   * whose impulse is overwritten on the next engine step, and on undelayed
+   * graphs where there are no delay-queue dots), plus the outgoing-edge pulses.
+   * The signal layer is cleared each frame by `drawSignals`, so this appends
+   * fresh every tick.
+   */
+  private drawNudgeFx(now: number): void {
+    if (!this.nudgeRing && this.nudgePulses.length === 0) return;
+    const layer = this.signalLayer;
+    if (this.nudgeRing) {
+      const age = now - this.nudgeRing.start;
+      if (age >= NUDGE_RING_MS) {
+        this.nudgeRing = null;
+      } else {
+        const node = this.simNodes.find((nd) => nd.id === this.nudgeRing!.nodeId);
+        if (node) {
+          const u = age / NUDGE_RING_MS;
+          const r = NODE_RADIUS + 6 + u * 24;
+          const opacity = (1 - u) * 0.8;
+          layer
+            .append("circle")
+            .attr("class", "nudge-ring")
+            .attr("data-dir", this.nudgeRing.dir >= 0 ? "1" : "-1")
+            .attr("cx", node.x)
+            .attr("cy", node.y)
+            .attr("r", r)
+            .style("opacity", String(opacity));
+        }
+      }
+    }
+    if (this.nudgePulses.length > 0) {
+      const edgeById = new Map(this.simEdges.map((e) => [e.id, e]));
+      for (const p of this.nudgePulses) {
+        const e = edgeById.get(p.edgeId);
+        if (!e) continue;
+        const frac = Math.min(1, p.age / NUDGE_PULSE_STEPS);
+        const x = e.source.x + (e.target.x - e.source.x) * frac;
+        const y = e.source.y + (e.target.y - e.source.y) * frac;
+        const opacity = (1 - frac) * 0.9;
+        layer
+          .append("circle")
+          .attr("class", "signal nudge-pulse")
+          .attr("data-sign", p.dir >= 0 ? "pos" : "neg")
+          .attr("cx", x)
+          .attr("cy", y)
+          .attr("r", 6)
+          .style("opacity", String(opacity));
+      }
+    }
   }
 
   /** Render migration arcs as dashed curved paths, faded by recency. */
@@ -945,12 +1096,15 @@ export class Layer1Renderer {
     // engine and produce the same trajectory (Phase 1 acceptance).
     const nudgeNode = (nodeId: string, dir: number, event: MouseEvent): void => {
       if (!this.graph || !this.engine) return;
-      this.engine.impulse(nodeId, dir * this.nudgeDeltaFor(nodeId));
+      const delta = dir * this.nudgeDeltaFor(nodeId);
+      this.engine.impulse(nodeId, delta);
       // Track this node for the live monitor (in single-node mode the dropdown
       // follows the nudge; in all-nodes mode every sparkline is already shown).
       this.trackedNodeId = nodeId;
+      this.beginNudgeFx(nodeId, dir, delta);
       this.styleNodeValues();
       this.drawSignals();
+      this.drawNudgeFx(performance.now());
       this.stepMonitor();
       this.opts.onNudge?.(nodeId, dir);
       event.stopPropagation();
