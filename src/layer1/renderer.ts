@@ -149,6 +149,9 @@ export class Layer1Renderer {
   private readonly svg: Selection<SVGSVGElement, unknown, null, unknown>;
   private readonly root: Selection<SVGGElement, unknown, null, unknown>;
   private readonly linkLayer: Selection<SVGGElement, unknown, null, unknown>;
+  /** Badge layer sits above signalLayer so polarity/delay text is never
+   * obscured by the traveling dot circles. */
+  private readonly badgeLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly signalLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly nodeLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly labelLayer: Selection<SVGGElement, unknown, null, unknown>;
@@ -214,12 +217,16 @@ export class Layer1Renderer {
     this.svg.attr("viewBox", `0 0 ${opts.width} ${opts.height}`);
 
     // A single zoomable group holds all layers so pan/zoom is unified.
+    // Z-order (back to front): edges → signal dots → badge text → nodes → labels → migration.
+    // Badges must sit above signal dots so the polarity +/− and delay numbers
+    // are never obscured by the traveling blue circles.
     this.root = this.svg.append("g").attr("class", "layer1-root");
     this.linkLayer = this.root.append("g").attr("class", "layer1-links");
     this.signalLayer = this.root.append("g").attr("class", "layer1-signals");
+    this.badgeLayer = this.root.append("g").attr("class", "layer1-badges");
+    this.nodeLayer = this.root.append("g").attr("class", "layer1-nodes");
     this.labelLayer = this.root.append("g").attr("class", "layer1-loop-labels");
     this.migrationLayer = this.root.append("g").attr("class", "layer1-migration");
-    this.nodeLayer = this.root.append("g").attr("class", "layer1-nodes");
 
     this.zoomBehavior = zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.2, 4])
@@ -880,6 +887,7 @@ export class Layer1Renderer {
   }
 
   private drawEdges(): void {
+    // Edge lines and arrows in linkLayer (below signal dots).
     const sel = this.linkLayer
       .selectAll<SVGGElement, SimEdge>("g.edge")
       .data(this.simEdges, (d) => d.id);
@@ -894,13 +902,32 @@ export class Layer1Renderer {
 
     enter.append("path").attr("class", "edge-line");
     enter.append("path").attr("class", "edge-arrow");
-    enter.append("circle").attr("class", "edge-polarity-bg");
-    enter.append("text").attr("class", "edge-polarity");
     enter.append("g").attr("class", "edge-hash");
-    enter.append("text").attr("class", "edge-delay-badge");
 
     const merged = enter.merge(sel);
+
+    // Badge elements (polarity circle + text, delay number) in badgeLayer so
+    // they render above the signal-dot layer and are never obscured.
+    const bsel = this.badgeLayer
+      .selectAll<SVGGElement, SimEdge>("g.edge-badge")
+      .data(this.simEdges, (d) => d.id);
+
+    bsel.exit().remove();
+
+    const benter = bsel
+      .enter()
+      .append("g")
+      .attr("class", "edge-badge")
+      .attr("data-edge-id", (d) => d.id);
+
+    benter.append("circle").attr("class", "edge-polarity-bg");
+    benter.append("text").attr("class", "edge-polarity");
+    benter.append("text").attr("class", "edge-delay-badge");
+
+    const bmerged = benter.merge(bsel);
+
     merged.each((d, i, groups) => this.layoutEdge(groups[i], d));
+    bmerged.each((d, i, groups) => this.layoutEdgeBadge(groups[i], d));
   }
 
   private layoutEdge(el: SVGGElement, d: SimEdge): void {
@@ -912,22 +939,35 @@ export class Layer1Renderer {
     );
     const geom = edgeGeometry(source, target);
     const g = select(el);
-    // Edge line weight scales with strength so influence reads at a glance
-    // (loopy: lineWidth = 4*|strength|-2). Floor at 1.5 for visibility.
     g.select(".edge-line")
       .attr("d", geom.path)
       .style("stroke-width", String(Math.max(1.5, 3 * Math.abs(d.strength) - 1)));
 
-    // Prominent chevron arrowhead at the target (loopy-style).
     const [tip, leftWing, rightWing] = arrowHead(geom, target, ARROW_SIZE);
     g.select(".edge-arrow").attr(
       "d",
       `M${leftWing.x},${leftWing.y} L${tip.x},${tip.y} L${rightWing.x},${rightWing.y}`,
     );
 
-    // Polarity badge: a small rounded chip at the midpoint carrying the +/−
-    // symbol — clearer against the edge than a bare glyph (loopy draws a
-    // label at the midpoint). Data attributes let CSS style it.
+    const hash = g.select(".edge-hash");
+    hash.selectAll("line").remove();
+    if (hasDelay({ delay: { type: d.delayType as Edge["delay"]["type"], magnitude: d.delayMagnitude } } as Edge)) {
+      const [a1, a2, b1, b2] = delayHashMarksDouble(geom);
+      hash.append("line").attr("x1", a1.x).attr("y1", a1.y).attr("x2", a2.x).attr("y2", a2.y);
+      hash.append("line").attr("x1", b1.x).attr("y1", b1.y).attr("x2", b2.x).attr("y2", b2.y);
+    }
+  }
+
+  private layoutEdgeBadge(el: SVGGElement, d: SimEdge): void {
+    const { source, target } = shortenToCircleBounds(
+      { x: d.source.x, y: d.source.y },
+      { x: d.target.x, y: d.target.y },
+      NODE_RADIUS,
+      NODE_RADIUS,
+    );
+    const geom = edgeGeometry(source, target);
+    const g = select(el);
+
     g.select(".edge-polarity-bg")
       .attr("cx", geom.midpoint.x)
       .attr("cy", geom.midpoint.y)
@@ -939,23 +979,8 @@ export class Layer1Renderer {
       .attr("data-polarity", d.polarity)
       .text(polaritySymbol({ polarity: d.polarity } as Edge));
 
-    const hash = g.select(".edge-hash");
-    hash.selectAll("line").remove();
     const badge = g.select(".edge-delay-badge");
     if (hasDelay({ delay: { type: d.delayType as Edge["delay"]["type"], magnitude: d.delayMagnitude } } as Edge)) {
-      const [a1, a2, b1, b2] = delayHashMarksDouble(geom);
-      hash
-        .append("line")
-        .attr("x1", a1.x)
-        .attr("y1", a1.y)
-        .attr("x2", a2.x)
-        .attr("y2", a2.y);
-      hash
-        .append("line")
-        .attr("x1", b1.x)
-        .attr("y1", b1.y)
-        .attr("x2", b2.x)
-        .attr("y2", b2.y);
       const bp = delayBadgePosition(geom);
       badge
         .attr("x", bp.x)
