@@ -37,7 +37,7 @@ Other useful commands:
 ```bash
 npm run typecheck   # tsc --noEmit (strict mode)
 npm run lint        # eslint
-npm test            # vitest — 134 unit tests
+npm test            # vitest — 335 unit tests
 npm run build       # production build → dist/ (~70 KB gzipped + 2 KB worker)
 ```
 
