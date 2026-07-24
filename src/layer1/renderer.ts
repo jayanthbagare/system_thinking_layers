@@ -149,11 +149,10 @@ export class Layer1Renderer {
   private readonly svg: Selection<SVGSVGElement, unknown, null, unknown>;
   private readonly root: Selection<SVGGElement, unknown, null, unknown>;
   private readonly linkLayer: Selection<SVGGElement, unknown, null, unknown>;
-  /** Badge layer sits above signalLayer so polarity/delay text is never
-   * obscured by the traveling dot circles. */
   private readonly badgeLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly nodeLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly labelLayer: Selection<SVGGElement, unknown, null, unknown>;
+  private readonly nudgeLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly migrationLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly zoomBehavior: ZoomBehavior<SVGSVGElement, unknown>;
 
@@ -215,13 +214,15 @@ export class Layer1Renderer {
     this.svg = select(svg);
     this.svg.attr("viewBox", `0 0 ${opts.width} ${opts.height}`);
 
-    // A single zoomable group holds all layers so pan/zoom is unified.
-    // Z-order (back to front): edges → badge text → nodes → labels → migration.
+    // Z-order (back to front): edges → badges → nodes → labels → nudge fx → migration.
+    // nudgeLayer is topmost so the traveling pulse and ping ring are never
+    // occluded by nodes, edges, or labels.
     this.root = this.svg.append("g").attr("class", "layer1-root");
     this.linkLayer = this.root.append("g").attr("class", "layer1-links");
     this.badgeLayer = this.root.append("g").attr("class", "layer1-badges");
     this.nodeLayer = this.root.append("g").attr("class", "layer1-nodes");
     this.labelLayer = this.root.append("g").attr("class", "layer1-loop-labels");
+    this.nudgeLayer = this.root.append("g").attr("class", "layer1-nudge");
     this.migrationLayer = this.root.append("g").attr("class", "layer1-migration");
 
     this.zoomBehavior = zoom<SVGSVGElement, unknown>()
@@ -387,11 +388,7 @@ export class Layer1Renderer {
    * read distinctly.
    */
   private drawSignals(): void {
-    // Clear nudge fx from badgeLayer each frame (permanent badge g.edge-badge
-    // elements stay; only ephemeral nudge-ring / nudge-pulse circles are removed).
-    this.badgeLayer.selectAll(".nudge-ring, .nudge-pulse").remove();
-    // Delay-pipeline dots removed: hash marks + delay number badge already
-    // communicate delay; the dot wall was visual noise that obscured badges.
+    this.nudgeLayer.selectAll("*").remove();
   }
 
   /**
@@ -442,9 +439,7 @@ export class Layer1Renderer {
    */
   private drawNudgeFx(now: number): void {
     if (!this.nudgeRing && this.nudgePulses.length === 0) return;
-    // Draw into badgeLayer (above signalLayer) so nudge ring and traveling
-    // pulse are never obscured by the static delay-pipeline dot circles.
-    const layer = this.badgeLayer;
+    const layer = this.nudgeLayer;
     if (this.nudgeRing) {
       const age = now - this.nudgeRing.start;
       if (age >= NUDGE_RING_MS) {
