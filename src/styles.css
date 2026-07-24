@@ -172,6 +172,15 @@ body {
   stroke-width: 1.5;
   pointer-events: none;
 }
+/* The nudge pulse is the hero cue: a single dot traveling along each outgoing
+   edge. Colored by direction (green up / red down) so it stands apart from the
+   blue delay-pipeline dots, which otherwise look like a static series. */
+.signal.nudge-pulse[data-sign="pos"] {
+  fill: var(--c-reinforcing);
+}
+.signal.nudge-pulse[data-sign="neg"] {
+  fill: var(--c-balancing);
+}
 
 /* Loop labels */
 .loop-label-text {

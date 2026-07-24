@@ -92,9 +92,11 @@ const NUDGE_SLOW_MS = 1600;
  * so a standard 10% nudge reaches this floor; bigger relative nudges stay
  * slower for longer. */
 const NUDGE_SLOW_FLOOR = 0.1;
-/** A nudge pulse crosses an edge in this many engine steps. Tied to the (scaled)
- * engine, so the pulse slows down with the slow motion. */
-const NUDGE_PULSE_STEPS = 10;
+/** Wall-clock time for the nudge pulse to travel one edge. Decoupled from the
+ * engine so the dot moves smoothly every frame (the engine steps in slow
+ * motion would otherwise make it stutter), and so it reads as a single
+ * traveling dot rather than the many static delay-pipeline dots. */
+const NUDGE_PULSE_MS = 700;
 /** Wall-clock lifetime of the nudge "ping" ring on the node. Decoupled from the
  * engine so the ring plays even on undelayed graphs and flow nodes, where the
  * impulse itself has no persistent visual. */
@@ -203,7 +205,7 @@ export class Layer1Renderer {
    * its outgoing edges so the impulse's direction is seen even on undelayed
    * graphs where the engine has no delay-queue pulses. */
   private nudgeRing: { nodeId: string; dir: number; start: number } | null = null;
-  private nudgePulses: { edgeId: string; dir: number; age: number }[] = [];
+  private nudgePulses: { edgeId: string; dir: number; start: number }[] = [];
 
   constructor(svg: SVGSVGElement, opts: RendererOptions) {
     this.opts = opts;
@@ -350,7 +352,6 @@ export class Layer1Renderer {
         n = 4;
       }
       for (let i = 0; i < n; i++) this.engine.step();
-      this.advanceNudgePulses(n);
       this.drawSignals();
       this.drawNudgeFx(now);
       this.styleNodeValues();
@@ -433,7 +434,7 @@ export class Layer1Renderer {
     this.nudgeRing = { nodeId, dir, start: now };
     this.nudgePulses = this.graph.edges
       .filter((e) => e.source === nodeId)
-      .map((e) => ({ edgeId: e.id, dir, age: 0 }));
+      .map((e) => ({ edgeId: e.id, dir, start: now }));
   }
 
   /** Ease the post-nudge time-scale back up to 1 (full speed) along an
@@ -455,22 +456,15 @@ export class Layer1Renderer {
     this.timeScale = minScale + (1 - minScale) * eased;
   }
 
-  /** Advance nudge pulses by the engine steps taken this frame, dropping any
-   * that have reached the far node. Tied to the (scaled) engine so the dots
-   * slow down with the slow motion. */
-  private advanceNudgePulses(steps: number): void {
-    if (steps <= 0 || this.nudgePulses.length === 0) return;
-    for (const p of this.nudgePulses) p.age += steps;
-    this.nudgePulses = this.nudgePulses.filter((p) => p.age < NUDGE_PULSE_STEPS);
-  }
-
   /**
    * Draw the nudge feedback onto the signal layer: an expanding, fading "ping"
    * ring on the nudged node (wall-clock, so it always plays — even on flow nodes
    * whose impulse is overwritten on the next engine step, and on undelayed
-   * graphs where there are no delay-queue dots), plus the outgoing-edge pulses.
-   * The signal layer is cleared each frame by `drawSignals`, so this appends
-   * fresh every tick.
+   * graphs where there are no delay-queue dots), plus a single dot traveling
+   * along each outgoing edge. Both are wall-clock driven so they move smoothly
+   * every frame — independent of the slow-motion engine stepping — and read as
+   * one moving dot rather than the many static delay-pipeline dots. The signal
+   * layer is cleared each frame by `drawSignals`, so this appends fresh per tick.
    */
   private drawNudgeFx(now: number): void {
     if (!this.nudgeRing && this.nudgePulses.length === 0) return;
@@ -498,20 +492,25 @@ export class Layer1Renderer {
     }
     if (this.nudgePulses.length > 0) {
       const edgeById = new Map(this.simEdges.map((e) => [e.id, e]));
+      // Drop pulses that have completed their travel.
+      this.nudgePulses = this.nudgePulses.filter((p) => now - p.start < NUDGE_PULSE_MS);
       for (const p of this.nudgePulses) {
         const e = edgeById.get(p.edgeId);
         if (!e) continue;
-        const frac = Math.min(1, p.age / NUDGE_PULSE_STEPS);
-        const x = e.source.x + (e.target.x - e.source.x) * frac;
-        const y = e.source.y + (e.target.y - e.source.y) * frac;
-        const opacity = (1 - frac) * 0.9;
+        const u = (now - p.start) / NUDGE_PULSE_MS;
+        const frac = Math.min(1, u);
+        // Ease-out so the dot launches briskly and settles into the target.
+        const eased = 1 - Math.pow(1 - frac, 2);
+        const x = e.source.x + (e.target.x - e.source.x) * eased;
+        const y = e.source.y + (e.target.y - e.source.y) * eased;
+        const opacity = (1 - frac) * 0.95;
         layer
           .append("circle")
           .attr("class", "signal nudge-pulse")
           .attr("data-sign", p.dir >= 0 ? "pos" : "neg")
           .attr("cx", x)
           .attr("cy", y)
-          .attr("r", 6)
+          .attr("r", 7)
           .style("opacity", String(opacity));
       }
     }
