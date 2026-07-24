@@ -206,7 +206,14 @@ export class Layer1Renderer {
    * its outgoing edges so the impulse's direction is seen even on undelayed
    * graphs where the engine has no delay-queue pulses. */
   private nudgeRing: { nodeId: string; dir: number; start: number } | null = null;
+  /** Nudge pulses: wall-clock traveling dots that chain hop-by-hop across the
+   * graph. Each pulse records the edge it travels and when it started. When it
+   * completes, new pulses are spawned on the outgoing edges of the target node
+   * so the impulse visibly propagates through the whole network. */
   private nudgePulses: { edgeId: string; dir: number; start: number }[] = [];
+  /** Set of edge ids that already have an active or scheduled pulse this wave,
+   * so the same edge is not traversed twice in a single propagation. */
+  private nudgePulseVisited: Set<string> = new Set();
 
   constructor(svg: SVGSVGElement, opts: RendererOptions) {
     this.opts = opts;
@@ -326,6 +333,7 @@ export class Layer1Renderer {
     this.slowStrength = 0;
     this.nudgeRing = null;
     this.nudgePulses = [];
+    this.nudgePulseVisited = new Set();
     this.buildMonitor();
     this.drawSignals();
     this.drawNudgeFx(performance.now());
@@ -407,9 +415,12 @@ export class Layer1Renderer {
     this.slowStart = now;
     this.updateTimeScale(now);
     this.nudgeRing = { nodeId, dir, start: now };
-    this.nudgePulses = this.graph.edges
-      .filter((e) => e.source === nodeId)
-      .map((e) => ({ edgeId: e.id, dir, start: now }));
+    this.nudgePulseVisited = new Set();
+    const outgoing = this.graph.edges.filter((e) => e.source === nodeId);
+    for (const e of outgoing) {
+      this.nudgePulseVisited.add(e.id);
+    }
+    this.nudgePulses = outgoing.map((e) => ({ edgeId: e.id, dir, start: now }));
   }
 
   /** Ease the post-nudge time-scale back up to 1 (full speed) along an
@@ -464,18 +475,43 @@ export class Layer1Renderer {
     }
     if (this.nudgePulses.length > 0) {
       const edgeById = new Map(this.simEdges.map((e) => [e.id, e]));
-      // Drop pulses that have completed their travel.
-      this.nudgePulses = this.nudgePulses.filter((p) => now - p.start < NUDGE_PULSE_MS);
+      const newPulses: typeof this.nudgePulses = [];
+      const completed: typeof this.nudgePulses = [];
+      const active: typeof this.nudgePulses = [];
+      for (const p of this.nudgePulses) {
+        if (now - p.start >= NUDGE_PULSE_MS) {
+          completed.push(p);
+        } else {
+          active.push(p);
+        }
+      }
+      // Chain: for each completed pulse, spawn new pulses on outgoing edges of
+      // the target node (skip already-visited edges to prevent cycles).
+      if (this.graph && completed.length > 0) {
+        for (const p of completed) {
+          const simEdge = edgeById.get(p.edgeId);
+          if (!simEdge) continue;
+          const targetId = simEdge.target.id;
+          const outgoing = this.graph.edges.filter(
+            (e) => e.source === targetId && !this.nudgePulseVisited.has(e.id),
+          );
+          for (const e of outgoing) {
+            this.nudgePulseVisited.add(e.id);
+            // Start from exactly when the previous pulse arrived.
+            newPulses.push({ edgeId: e.id, dir: p.dir, start: p.start + NUDGE_PULSE_MS });
+          }
+        }
+      }
+      this.nudgePulses = [...active, ...newPulses];
+      // Draw all active pulses (including freshly spawned ones).
       for (const p of this.nudgePulses) {
         const e = edgeById.get(p.edgeId);
         if (!e) continue;
         const u = (now - p.start) / NUDGE_PULSE_MS;
         const frac = Math.min(1, u);
-        // Ease-out so the dot launches briskly and settles into the target.
         const eased = 1 - Math.pow(1 - frac, 2);
         const x = e.source.x + (e.target.x - e.source.x) * eased;
         const y = e.source.y + (e.target.y - e.source.y) * eased;
-        // Stay fully opaque during travel; only fade in the final 25%.
         const opacity = frac > 0.75 ? (1 - frac) * 4 * 0.95 : 0.95;
         layer
           .append("circle")
