@@ -394,6 +394,9 @@ export class Layer1Renderer {
     if (!this.engine) return;
     const edgeById = new Map(this.simEdges.map((e) => [e.id, e]));
     this.signalLayer.selectAll("*").remove();
+    // Clear nudge fx from badgeLayer each frame (permanent badge g.edge-badge
+    // elements stay; only ephemeral nudge-ring / nudge-pulse circles are removed).
+    this.badgeLayer.selectAll(".nudge-ring, .nudge-pulse").remove();
     const pulses: { edge: SimEdge; frac: number; sign: "pos" | "neg" }[] = [];
     for (const [eid, q] of Object.entries(this.engine.state.delayQueues)) {
       const e = edgeById.get(eid);
@@ -475,7 +478,9 @@ export class Layer1Renderer {
    */
   private drawNudgeFx(now: number): void {
     if (!this.nudgeRing && this.nudgePulses.length === 0) return;
-    const layer = this.signalLayer;
+    // Draw into badgeLayer (above signalLayer) so nudge ring and traveling
+    // pulse are never obscured by the static delay-pipeline dot circles.
+    const layer = this.badgeLayer;
     if (this.nudgeRing) {
       const age = now - this.nudgeRing.start;
       if (age >= NUDGE_RING_MS) {
