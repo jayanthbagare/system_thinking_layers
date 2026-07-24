@@ -140,7 +140,7 @@ describe("Layer3Panel — typed ToC interventions (Phase 4)", () => {
     panel.enable();
     const types = host.querySelectorAll<HTMLElement>("[data-type]");
     expect(Array.from(types).map((b) => b.dataset.type).sort()).toEqual(
-      ["elevate", "exploit", "subordinate"],
+      ["elevate", "exploit", "structural", "subordinate"],
     );
     // Exploit is the default selection.
     expect(host.querySelector<HTMLElement>('[data-type="exploit"]')?.classList.contains("is-selected")).toBe(true);

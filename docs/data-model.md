@@ -176,3 +176,38 @@ faded by recency.
 in the trail: *"Cycle detected: two elevations, net ΔT ≈ 0, ΔOE +X. The
 constraint returned to where it started."* This is the payload of the whole
 feature — the most under-internalised idea in ToC.
+
+## Layer 3 — structural interventions and leverage tiers (Phase 6)
+
+Architects change **topology**, not just parameters. Structural edits are
+first-class interventions (see `src/layer3/structural.ts`):
+
+- **Collapse delay** — shorten an edge's delay by a factor (0 = remove entirely;
+  caching, async, colocation). Tier 4 — Delay.
+- **Change delay type** — switch between material/information/perception. Tier 4.
+- **Flip polarity** — swap + ↔ − on an edge (invert a loop's sign). Tier 6 — Rules.
+- **Add edge / Delete edge** — rewire feedback. Tier 5 — Structure.
+- **Split node** — replace one node with two in series with a delay between them
+  (introduce a queue / add a handoff). Collars on the original must be explicitly
+  reassigned (`collarTo: "original" | "new"`); the logic never guesses.
+
+Every structural edit is applied as a hypothetical: a pre/post run over the
+same engine with the same T/I/OE readout, ratios, J-curve, and DoF change as a
+parameter intervention — so the user compares a structural change and a parameter
+change **on the same axes**.
+
+The **leverage tier** (spec §6.3) annotates each intervention by how much it
+moves T/I/OE per unit of OE:
+
+| Tier | Kind | Examples |
+|---|---|---|
+| 1 | Parameter | Exploit, strength changes |
+| 2 | Bound | Elevate (moving a collar) |
+| 3 | Buffer | Buffer sizing |
+| 4 | Delay | Collapse delay, change delay type |
+| 5 | Structure | Subordinate (add rope), add/delete edge, split node |
+| 6 | Rules | Flip polarity, change goal_node |
+
+Collars gave us a clean tier 2: moving a wall is categorically distinct from
+moving within the walls, and ToC's Exploit-before-Elevate discipline is exactly
+the claim that tier 1 must be exhausted before tier 2 is paid for.

@@ -28,12 +28,14 @@ import {
   simulateTyped,
   clampExploitMagnitude,
   operatingHeadroom,
+  TIER_LABELS,
   type Intervention,
   type IntegratorMethod,
   type TypedIntervention,
   type InterventionType,
   type Direction,
   type TypedSimulationResult,
+  type StructuralEdit,
 } from "@/layer3";
 import { sparkline, type SparklineSeries } from "@/layer3";
 import { DEFAULT_WEIGHTS, topConstraints, type Weights } from "@/layer2/scoring";
@@ -48,12 +50,14 @@ const TYPE_LABELS: Record<InterventionType, string> = {
   exploit: "Exploit",
   subordinate: "Subordinate",
   elevate: "Elevate",
+  structural: "Structural",
 };
 
 const TYPE_BLURB: Record<InterventionType, string> = {
   exploit: "Close the gap to the existing upper collar. The collar does not move.",
   subordinate: "Add a rope: a negative edge from a downstream buffer to the upstream release.",
   elevate: "Move the upper collar up. OE rises (more flow through the constraint).",
+  structural: "Edit topology: collapse a delay, flip polarity, add/delete edge, or split a node.",
 };
 
 const TIOE_META: { key: "T" | "I" | "OE"; label: string; description: string }[] = [
@@ -90,6 +94,10 @@ export class Layer3Panel {
   private magnitude = MAGNITUDE_DEFAULT;
   /** Subordinate rope endpoints. Defaults are filled from the graph on first render. */
   private rope: { buffer: string; release: string } = { buffer: "", release: "" };
+  /** Structural edit kind + target edge id (Phase 6). */
+  private structKind: "collapseDelay" | "changeDelayType" | "flipPolarity" | "splitNode" = "collapseDelay";
+  private structEdgeId: string = "";
+  private structDelayFactor = 0; // 0 = remove delay entirely
 
   // Raw-impulse state for the canvas-nudge probe (Phase 1 bridge).
   private mode: PanelMode = "typed";
@@ -217,7 +225,7 @@ export class Layer3Panel {
     typeLabel.textContent = "Intervention";
     const typeGroup = document.createElement("div");
     typeGroup.className = "layer3-type-group";
-    (["exploit", "subordinate", "elevate"] as InterventionType[]).forEach((t) => {
+    (["exploit", "subordinate", "elevate", "structural"] as InterventionType[]).forEach((t) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = TYPE_LABELS[t];
@@ -244,6 +252,9 @@ export class Layer3Panel {
 
     // Subordinate rope selectors (only meaningful for subordinate).
     wrap.append(this.renderRopeSelectors());
+
+    // Structural edit controls (only meaningful for structural).
+    wrap.append(this.renderStructuralControls());
 
     // Magnitude slider (range adapts to the intervention type / headroom).
     wrap.append(this.renderMagnitudeSlider());
@@ -376,6 +387,95 @@ export class Layer3Panel {
     return row;
   }
 
+  private renderStructuralControls(): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "layer3-control layer3-structural";
+    row.dataset.role = "structural";
+    row.style.display = this.type === "structural" ? "" : "none";
+
+    const label = document.createElement("span");
+    label.textContent = "Structural edit";
+    row.append(label);
+
+    // Edit kind selector.
+    const kindSel = document.createElement("select");
+    kindSel.dataset.role = "struct-kind";
+    const kinds: { v: "collapseDelay" | "changeDelayType" | "flipPolarity" | "splitNode"; label: string }[] = [
+      { v: "collapseDelay", label: "Collapse delay" },
+      { v: "changeDelayType", label: "Change delay type" },
+      { v: "flipPolarity", label: "Flip polarity" },
+      { v: "splitNode", label: "Split node" },
+    ];
+    for (const k of kinds) {
+      const opt = document.createElement("option");
+      opt.value = k.v;
+      opt.textContent = k.label;
+      if (k.v === this.structKind) opt.selected = true;
+      kindSel.append(opt);
+    }
+    kindSel.addEventListener("change", () => {
+      this.structKind = kindSel.value as typeof this.structKind;
+      this.syncStructControls();
+      this.renderTrajectory();
+    });
+    row.append(kindSel);
+
+    // Edge selector (for collapseDelay, changeDelayType, flipPolarity).
+    const edgeSel = document.createElement("select");
+    edgeSel.dataset.role = "struct-edge";
+    for (const e of this.graph.edges) {
+      const opt = document.createElement("option");
+      opt.value = e.id;
+      const src = this.graph.nodes.find((n) => n.id === e.source)?.label ?? e.source;
+      const tgt = this.graph.nodes.find((n) => n.id === e.target)?.label ?? e.target;
+      opt.textContent = `${e.id}: ${src} \u2192 ${tgt}`;
+      if (e.id === this.structEdgeId) opt.selected = true;
+      edgeSel.append(opt);
+    }
+    if (!this.structEdgeId && this.graph.edges.length > 0) {
+      this.structEdgeId = this.graph.edges[0].id;
+      edgeSel.value = this.structEdgeId;
+    }
+    edgeSel.addEventListener("change", () => {
+      this.structEdgeId = edgeSel.value;
+      this.renderTrajectory();
+    });
+    row.append(edgeSel);
+
+    // Delay factor slider (for collapseDelay only).
+    const factorRow = document.createElement("label");
+    factorRow.className = "layer3-struct-factor";
+    factorRow.dataset.role = "struct-factor";
+    factorRow.style.display = this.structKind === "collapseDelay" ? "" : "none";
+    const factorLabel = document.createElement("span");
+    factorLabel.textContent = "Delay factor";
+    const factorInput = document.createElement("input");
+    factorInput.type = "range";
+    factorInput.min = "0";
+    factorInput.max = "1";
+    factorInput.step = "0.1";
+    factorInput.value = String(this.structDelayFactor);
+    factorInput.dataset.role = "struct-factor-input";
+    const factorVal = document.createElement("span");
+    factorVal.className = "layer3-control-value";
+    factorVal.textContent = this.structDelayFactor.toFixed(1);
+    factorInput.addEventListener("input", () => {
+      this.structDelayFactor = Number.parseFloat(factorInput.value);
+      factorVal.textContent = this.structDelayFactor.toFixed(1);
+      this.renderTrajectory();
+    });
+    factorRow.append(factorLabel, factorInput, factorVal);
+    row.append(factorRow);
+
+    return row;
+  }
+
+  /** Show/hide the structural sub-controls based on the edit kind. */
+  private syncStructControls(): void {
+    const factorRow = this.host.querySelector<HTMLElement>('[data-role="struct-factor"]');
+    if (factorRow) factorRow.style.display = this.structKind === "collapseDelay" ? "" : "none";
+  }
+
   private renderMagnitudeSlider(): HTMLElement {
     const range = this.magnitudeRange();
     const row = document.createElement("label");
@@ -493,6 +593,7 @@ export class Layer3Panel {
       target: this.nodeId,
       magnitude: this.magnitude,
       ...(this.type === "subordinate" ? { rope: this.rope } : {}),
+      ...(this.type === "structural" ? { edit: this.buildStructuralEdit() } : {}),
     };
     const result = simulateTyped(
       this.graph,
@@ -501,6 +602,7 @@ export class Layer3Panel {
       this.steps,
     );
     for (const meta of TIOE_META) wrap.append(this.renderOneSparkline(result.pre, result.post, meta));
+    wrap.append(this.renderTierRow(result));
     wrap.append(this.renderSignatureRow(result));
     wrap.append(this.renderRatiosRow(result));
     wrap.append(this.renderJCurveRow(result));
@@ -680,6 +782,24 @@ export class Layer3Panel {
     return row;
   }
 
+  private renderTierRow(result: TypedSimulationResult): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "layer3-analysis-row layer3-tier";
+    row.dataset.role = "tier";
+    const title = document.createElement("span");
+    title.className = "layer3-analysis-title";
+    title.textContent = "Leverage tier";
+    row.append(title);
+    const chip = document.createElement("span");
+    chip.className = "layer3-tier-chip";
+    const tier = result.tier;
+    chip.textContent = `Tier ${tier} \u2014 ${TIER_LABELS[tier]}`;
+    chip.title =
+      "Higher tiers move T/I/OE more per unit of OE. ToC's Exploit-before-Elevate discipline is the claim that tier 1 must be exhausted before tier 2 is paid for.";
+    row.append(chip);
+    return row;
+  }
+
   // --- sync helpers ------------------------------------------------------
 
   private syncNodeSelect(): void {
@@ -687,10 +807,12 @@ export class Layer3Panel {
     if (sel) sel.value = this.nodeId;
   }
 
-  /** Show/hide the rope selectors and mode hint when the type or mode changes. */
+  /** Show/hide the rope/structural controls and apply button when the type or mode changes. */
   private syncModeToggle(): void {
     const rope = this.host.querySelector<HTMLElement>('[data-role="rope"]');
     if (rope) rope.style.display = this.mode === "typed" && this.type === "subordinate" ? "" : "none";
+    const struct = this.host.querySelector<HTMLElement>('[data-role="structural"]');
+    if (struct) struct.style.display = this.mode === "typed" && this.type === "structural" ? "" : "none";
     const applyBtn = this.host.querySelector<HTMLButtonElement>('[data-role="apply"]');
     if (applyBtn) applyBtn.disabled = this.mode !== "typed";
   }
@@ -785,6 +907,32 @@ export class Layer3Panel {
       flows.find((f) => f.id !== this.nodeId)?.id ??
       "";
     this.rope = { buffer, release };
+  }
+
+  /** Build the StructuralEdit descriptor from the current UI state. */
+  private buildStructuralEdit(): StructuralEdit {
+    const edgeId = this.structEdgeId || this.graph.edges[0]?.id || "";
+    const edge = this.graph.edges.find((e) => e.id === edgeId);
+    switch (this.structKind) {
+      case "collapseDelay":
+        return { kind: "collapseDelay", edgeId, factor: this.structDelayFactor };
+      case "changeDelayType":
+        return { kind: "changeDelayType", edgeId, delayType: "none" };
+      case "flipPolarity":
+        return { kind: "flipPolarity", edgeId };
+      case "splitNode":
+        return {
+          kind: "splitNode",
+          nodeId: this.nodeId,
+          newId: `${this.nodeId}_split`,
+          newLabel: `${this.graph.nodes.find((n) => n.id === this.nodeId)?.label ?? this.nodeId} (split)`,
+          delay: { type: "material", magnitude: 2 },
+          collarTo: "original",
+        };
+    }
+    // Fallback: a no-op collapse on the first edge.
+    void edge;
+    return { kind: "collapseDelay", edgeId, factor: 1 };
   }
 }
 

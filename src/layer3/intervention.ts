@@ -49,9 +49,16 @@ import {
 } from "@/sim";
 import type { IntegratorOptions } from "./simulate";
 import { DEFAULT_INTEGRATOR_OPTIONS } from "./simulate";
+import {
+  applyStructuralEdit,
+  structuralEditTier,
+  type LeverageTier,
+  type StructuralEdit,
+} from "./structural";
 
-/** The three ToC intervention classes that map onto collar operations. */
-export type InterventionType = "exploit" | "subordinate" | "elevate";
+/** The ToC intervention classes that map onto collar operations, plus
+ * `structural` for topology edits (spec Phase 6). */
+export type InterventionType = "exploit" | "subordinate" | "elevate" | "structural";
 
 /**
  * A typed intervention. `type` selects the collar operation; the remaining
@@ -74,6 +81,13 @@ export interface TypedIntervention {
    * `buffer -> release`. Ignored for exploit/elevate.
    */
   rope?: { buffer: string; release: string };
+  /**
+   * Structural only: the topology edit to apply (collapse delay, flip
+   * polarity, add/delete edge, split node). The edit is applied to a *copy* of
+   * the graph; `target` is the edge or node id it concerns. Ignored for
+   * exploit/subordinate/elevate.
+   */
+  edit?: StructuralEdit;
 }
 
 /** Sign-of-change for one TA aggregate, as a direction enum. */
@@ -153,6 +167,8 @@ export interface TypedSimulationResult {
   ratios: TaRatios;
   jCurve: JCurve;
   dof: DofChange;
+  /** Leverage tier (spec §6.3): 1=Parameter .. 6=Rules. */
+  tier: LeverageTier;
   /** End-of-horizon deltas. */
   deltaT: number;
   deltaI: number;
@@ -175,6 +191,11 @@ const SIGNATURES: Record<InterventionType, ExpectedSignature> = {
   // Elevate: T up; OE up (the moved collar adds capacity cost); I up (more
   // flow through the now-larger constraint raises in-system mass).
   elevate: { T: ["up"], I: ["up"], OE: ["up"] },
+  // Structural: topology changes have no fixed TA signature — a delay collapse
+  // may raise or lower T; a polarity flip may invert a loop. All directions
+  // are allowed so the analysis never false-alarms; the user reads the actual
+  // delta. The leverage tier (§6.3) is the useful classification here.
+  structural: { T: ["up", "down", "flat"], I: ["up", "down", "flat"], OE: ["up", "down", "flat"] },
 };
 
 /** The predicted T/I/OE allowed directions for an intervention type. Pure. */
@@ -184,6 +205,36 @@ export function expectedSignature(type: InterventionType): ExpectedSignature {
     I: [...SIGNATURES[type].I],
     OE: [...SIGNATURES[type].OE],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Leverage tier (spec §6.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * The leverage tier for an intervention — how much it moves T/I/OE per unit of
+ * OE. Higher tiers move the system more per unit of cost. The user should
+ * observe that tier 1 (Exploit) is cheap and tier 5 (Structure) is expensive
+ * but powerful — without the tool lecturing them.
+ *
+ *   1 — Parameter : Exploit, strength changes
+ *   2 — Bound     : Elevate (moving a collar)
+ *   3 — Buffer    : buffer sizing (not yet a first-class intervention)
+ *   4 — Delay     : collapse delay, change delay type
+ *   5 — Structure : Subordinate (add rope), add/delete edge, split node
+ *   6 — Rules     : flip polarity, change goal_node
+ */
+export function leverageTier(iv: TypedIntervention): LeverageTier {
+  switch (iv.type) {
+    case "exploit":
+      return 1;
+    case "elevate":
+      return 2;
+    case "subordinate":
+      return 5; // adds a rope edge — a structural change
+    case "structural":
+      return iv.edit ? structuralEditTier(iv.edit) : 5;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +304,10 @@ export interface AppliedIntervention {
  * - **Elevate**: a *copy* of the graph has the target's `collar.upper` raised
  *   by `magnitude`; the state is unchanged (the operating point stays; the
  *   wall moved).
+ * - **Structural**: the carried `edit` (collapse delay, flip polarity, split
+ *   node, etc.) is applied to a *copy* of the graph; the state is re-seeded
+ *   from the new graph's `initial_value`s (structural changes may add/remove
+ *   nodes, so the state's node set must be rebuilt).
  */
 export function applyTypedIntervention(
   graph: Graph,
@@ -267,7 +322,24 @@ export function applyTypedIntervention(
       return applySubordinate(graph, state, iv, opts);
     case "elevate":
       return applyElevate(graph, state, iv);
+    case "structural":
+      return applyStructural(graph, state, iv, opts);
   }
+}
+
+function applyStructural(
+  graph: Graph,
+  state: SimState,
+  iv: TypedIntervention,
+  opts: EngineOptions,
+): AppliedIntervention {
+  if (!iv.edit) return { graph, state };
+  const nextGraph = applyStructuralEdit(graph, iv.edit);
+  // A structural change may add/remove nodes or edges, so the state must be
+  // re-seeded from the new graph. The operating point (initial_value) is
+  // preserved for existing nodes; new nodes start at their initial_value.
+  const newState = initialState(nextGraph, opts);
+  return { graph: nextGraph, state: newState };
 }
 
 function applyExploit(graph: Graph, state: SimState, iv: TypedIntervention): AppliedIntervention {
@@ -392,6 +464,7 @@ export function simulateTyped(
   const ratios = taRatios(pre, post, steps);
   const jCurve = detectJCurve(pre, post);
   const dof = dofChange(graph, preStates, postStates);
+  const tier = leverageTier(iv);
 
   return {
     pre,
@@ -403,6 +476,7 @@ export function simulateTyped(
     ratios,
     jCurve,
     dof,
+    tier,
     deltaT,
     deltaI,
     deltaOE,

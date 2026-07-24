@@ -37,6 +37,7 @@ export {
   taRatios,
   detectJCurve,
   dofChange,
+  leverageTier,
   type InterventionType,
   type TypedIntervention,
   type ExpectedSignature,
@@ -49,3 +50,11 @@ export {
   type TypedSimulationResult,
   type AppliedIntervention,
 } from "./intervention";
+// Phase 6 — structural interventions + leverage tiers.
+export {
+  applyStructuralEdit,
+  structuralEditTier,
+  TIER_LABELS,
+  type LeverageTier,
+  type StructuralEdit,
+} from "./structural";
