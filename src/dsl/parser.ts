@@ -86,6 +86,7 @@ export function serializeGraphYaml(graph: Graph): string {
       if (n.collar.approach) parts.push(`approach: ${yamlScalar(n.collar.approach)}`);
       if (parts.length > 0) lines.push(`    collar: { ${parts.join(", ")} }`);
     }
+    if (n.capacity_cost !== undefined) lines.push(`    capacity_cost: ${num(n.capacity_cost)}`);
     if (n.pin) {
       lines.push(`    pin: { x: ${num(n.pin.x)}, y: ${num(n.pin.y)} }`);
     }
@@ -156,6 +157,7 @@ interface RawNode {
   lower_collar?: number;
   upper_collar?: number;
   collar?: { lower?: number; upper?: number; approach?: string };
+  capacity_cost?: number;
   agent_binding?: { rule_id?: string };
   pin?: { x?: number; y?: number };
   tioe_class?: string;
@@ -212,6 +214,7 @@ function normalizeNode(r: RawNode): Node {
     ...(r.boundary === true ? { boundary: true } : {}),
     ...(pin ? { pin } : {}),
     ...(collar ? { collar } : {}),
+    ...(typeof r.capacity_cost === "number" ? { capacity_cost: r.capacity_cost } : {}),
     ...(agent_binding ? { agent_binding } : {}),
   };
   // Pass legacy flat fields through so the validator can flag them. These are

@@ -70,6 +70,16 @@ export interface Node {
    * Omit for an unbounded node.
    */
   collar?: Collar;
+  /**
+   * Operating expense the constrained resource consumes per unit of model
+   * time, regardless of utilization — the cost of *having* the capacity (a
+   * declared capacity cost, Phase 4). When present, `deriveTioe` counts this
+   * node's contribution to OE as `capacity_cost` (so Exploit, which keeps the
+   * collar fixed, holds OE flat, and Elevate, which moves the collar, raises
+   * OE proportionally). When absent, OE falls back to the flow through the
+   * collared stock (the Phase 3 utilization proxy). Omit for an unbounded node.
+   */
+  capacity_cost?: number;
   /** Present only if this node has an ABM companion. Omit when absent. */
   agent_binding?: AgentRuleRef;
   /**

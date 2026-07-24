@@ -18,6 +18,7 @@ Node {
   initial_value: number
   unit: string
   collar?: Collar                         // physical bounds, same units as initial_value
+  capacity_cost?: number                  // OE the constrained resource consumes (fixed; Phase 4)
   agent_binding?: AgentRuleRef           // present only if this node has an ABM companion
   pin?: { x: number; y: number }         // manual layout pin (view-derived, but persists)
   abm_verdict?: AbmVerdict               // written by the ABM companion (Phase 5)
@@ -39,6 +40,14 @@ collar is a fact about the system in the system's own units — not a display
 clamp. Legacy flat `lower_collar`/`upper_collar` fields (normalized [0,1]) are
 rejected at parse time with `collar_ambiguous_units`; authors must restate them
 in the `collar:` block with physical units.
+
+`capacity_cost` is the operating expense a constrained resource consumes per
+unit of model time, regardless of utilization — the cost of *having* the
+capacity. When present, `deriveTioe` counts it (fixed) as that node's OE
+contribution, so **Exploit** (which keeps the collar fixed) holds OE flat and
+**Elevate** (which moves the collar) raises OE proportionally. When absent, OE
+falls back to the flow through the collared stock (the Phase 3 utilization
+proxy). See the typed interventions in `src/layer3/intervention.ts`.
 
 `boundary` marks a node as the system's interface with its environment (market
 demand, supplier inputs, customer outputs). When no node has `boundary: true`,
@@ -116,4 +125,29 @@ problems in one pass. A `Graph` is valid iff `validate(graph)` returns `[]`.
 | `negative_delay` / `negative_strength` | magnitudes and weights are non-negative |
 | `loop_sign_mismatch` | if loops are carried at load time, their sign must match edge polarities |
 
+| `collar_ambiguous_units` | legacy flat collar fields present, or non-numeric collar bounds |
+| `collar_lower_above_upper` | `collar.lower < collar.upper` when both set |
+| `collar_initial_out_of_range` | `lower <= initial_value <= upper` when bounds set |
+| `collar_invalid_approach` | `collar.approach` is `"hard"` or `"soft"` |
+| `capacity_cost_negative` | `capacity_cost` is a non-negative number |
+| `range_invalid` | authored `range` pairs are `[min, max]` with `min <= max` |
+
 See [`src/model/validate.ts`](../src/model/validate.ts) for the implementation.
+
+## Layer 3 — typed ToC interventions (Phase 4)
+
+With physical collars in place, the three Theory-of-Constraints interventions
+are exact collar operations (see `src/layer3/intervention.ts`):
+
+| Type | Collar operation | Expected signature |
+|---|---|---|
+| **Exploit** | Close the gap to the *existing* upper collar; the collar does not move. Capped at available headroom; disabled at zero headroom. | T up, OE flat, I flat-or-down |
+| **Subordinate** | Add a rope — a negative-polarity information edge from a downstream buffer to the upstream release flow (a structural edit). | I down sharply, T flat, OE flat |
+| **Elevate** | Move the upper collar up; the capacity cost (OE) is scaled proportionally. | T up, OE up, I up |
+
+Each intervention runs as a pre/post pair over the same engine; the panel shows
+the expected vs observed signature (disagreements are flagged), the TA decision
+ratios (ΔT/ΔOE, ΔT/ΔI, ΔT per unit of constraint time, payback horizon), the
+J-curve (worse-before-better depth and duration), and the degrees-of-freedom
+change. The L1 canvas nudge remains a raw impulse probe (the Phase 1 bridge),
+separate from the typed selector.

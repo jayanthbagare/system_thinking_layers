@@ -27,3 +27,25 @@ export {
 export { sparkline } from "./sparkline";
 export type { SparklineOptions, SparklinePoint, SparklineSeries } from "./sparkline";
 export { Layer3Panel } from "./panel";
+// Phase 4 — typed ToC interventions as collar operations.
+export {
+  expectedSignature,
+  operatingHeadroom,
+  clampExploitMagnitude,
+  applyTypedIntervention,
+  simulateTyped,
+  taRatios,
+  detectJCurve,
+  dofChange,
+  type InterventionType,
+  type TypedIntervention,
+  type ExpectedSignature,
+  type ObservedSignature,
+  type SignatureAgreement,
+  type Direction,
+  type TaRatios,
+  type JCurve,
+  type DofChange,
+  type TypedSimulationResult,
+  type AppliedIntervention,
+} from "./intervention";

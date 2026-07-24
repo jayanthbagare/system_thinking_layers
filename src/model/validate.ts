@@ -45,6 +45,7 @@ export type ValidationCode =
   | "collar_lower_above_upper"
   | "collar_initial_out_of_range"
   | "collar_invalid_approach"
+  | "capacity_cost_negative"
   | "range_invalid";
 
 export interface ValidationIssue {
@@ -222,6 +223,22 @@ function validateNode(node: unknown, seen: Set<string>): ValidationIssue[] {
       issues.push({
         code: "collar_invalid_approach",
         message: `node "${n.id}" collar.approach must be "hard" or "soft"`,
+        ref: n.id,
+      });
+    }
+  }
+  // Declared capacity cost (Phase 4 OE source). Optional; must be >= 0.
+  if (n.capacity_cost !== undefined) {
+    if (typeof n.capacity_cost !== "number" || Number.isNaN(n.capacity_cost)) {
+      issues.push({
+        code: "capacity_cost_negative",
+        message: `node "${n.id}" capacity_cost must be a number`,
+        ref: n.id,
+      });
+    } else if (n.capacity_cost < 0) {
+      issues.push({
+        code: "capacity_cost_negative",
+        message: `node "${n.id}" capacity_cost must be >= 0`,
         ref: n.id,
       });
     }

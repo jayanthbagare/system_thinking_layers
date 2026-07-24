@@ -44,6 +44,7 @@ A working fixture lives at
 | `initial_value` | no | number | `0` |
 | `unit` | no | string | `""` |
 | `collar` | no | object (below) | omitted (unbounded) |
+| `capacity_cost` | no | number | omitted | Operating expense the constrained resource consumes per unit of model time, regardless of utilization. When present, `deriveTioe` counts it as that node's fixed OE — so Exploit (collar fixed) holds OE flat and Elevate (collar moved) raises OE. When absent, OE falls back to the flow through the collared stock. |
 | `agent_binding` | no | `{ rule_id: string }` | omitted |
 | `pin` | no | `{ x: number, y: number }` | omitted (auto-layout) |
 
@@ -69,7 +70,24 @@ reject-and-backpressure (excess returns to delay queues).
   initial_value: 100
   unit: units/week
   collar: { lower: 0, upper: 120 }
+  capacity_cost: 50
 ```
+
+### Typed ToC interventions (Layer 3, Phase 4)
+
+Layer 3's intervention control is a type selector, not a raw Δ slider. The
+three types map onto collar operations on the selected node:
+
+| Type | What it does | Expected T/I/OE |
+|---|---|---|
+| **Exploit** | Raise the operating point toward the *existing* upper collar (the collar does not move). Capped at available headroom; disabled at zero headroom. | T up, OE flat, I flat-or-down |
+| **Subordinate** | Splice a rope — a negative-polarity information edge `buffer -> release` — reducing upstream pressure on a collar that cannot absorb it. | I down sharply, T flat, OE flat |
+| **Elevate** | Move the upper collar up; the `capacity_cost` is scaled proportionally so OE rises. | T up, OE up, I up |
+
+The panel reports the expected vs observed signature (disagreements flagged),
+the TA decision ratios (ΔT/ΔOE, ΔT/ΔI, ΔT per constraint time, payback
+horizon), the J-curve (worse-before-better depth/duration), and the
+degrees-of-freedom change. See `src/layer3/intervention.ts`.
 
 ## Edge fields
 

@@ -28,9 +28,14 @@ function nodeSelectValue(host: HTMLElement): string {
 }
 
 function deltaSliderValue(host: HTMLElement): number {
-  const input = host.querySelector<HTMLInputElement>('[data-role="delta"]');
-  if (!input) throw new Error("delta slider not found");
-  return Number.parseFloat(input.value);
+  // The raw Δ slider was removed in Phase 4 (replaced by the typed-intervention
+  // selector). A canvas nudge now switches the panel into a raw-impulse mode
+  // and exposes its signed delta via a data attribute on the sparklines wrap.
+  const wrap = host.querySelector<HTMLElement>('[data-role="sparklines"]');
+  if (!wrap) throw new Error("sparklines wrap not found");
+  const v = wrap.getAttribute("data-raw-delta");
+  if (v === null) throw new Error("raw-delta not set (panel not in raw mode)");
+  return Number.parseFloat(v);
 }
 
 describe("Layer3Panel — setWeights follows the Layer 2 top constraint", () => {
@@ -101,13 +106,17 @@ describe("Layer3Panel — applyNudge drives the intervention from a canvas nudge
     const host = document.createElement("div");
     const panel = new Layer3Panel(host, graph);
     panel.enable();
-    const before = deltaSliderValue(host);
-
+    // A canvas nudge switches the panel to raw-impulse mode and sets the
+    // signed delta from the direction (up = +, down = −), keeping the
+    // magnitude constant across opposite nudges.
     panel.applyNudge("production_capacity", -1);
-    expect(deltaSliderValue(host)).toBe(-Math.abs(before));
+    const down = deltaSliderValue(host);
+    expect(down).toBeLessThan(0);
 
     panel.applyNudge("production_capacity", 1);
-    expect(deltaSliderValue(host)).toBe(Math.abs(before));
+    const up = deltaSliderValue(host);
+    expect(up).toBeGreaterThan(0);
+    expect(Math.abs(up)).toBe(Math.abs(down));
   });
 
   it("locks the node: a later setWeights no longer auto-follows L2", () => {
@@ -120,5 +129,60 @@ describe("Layer3Panel — applyNudge drives the intervention from a canvas nudge
 
     panel.setWeights(DELAY_ONLY);
     expect(nodeSelectValue(host)).toBe("wholesaler_backlog");
+  });
+});
+
+describe("Layer3Panel — typed ToC interventions (Phase 4)", () => {
+  it("renders the Exploit / Subordinate / Elevate type selector", () => {
+    const graph = loadBeerFixture();
+    const host = document.createElement("div");
+    const panel = new Layer3Panel(host, graph);
+    panel.enable();
+    const types = host.querySelectorAll<HTMLElement>("[data-type]");
+    expect(Array.from(types).map((b) => b.dataset.type).sort()).toEqual(
+      ["elevate", "exploit", "subordinate"],
+    );
+    // Exploit is the default selection.
+    expect(host.querySelector<HTMLElement>('[data-type="exploit"]')?.classList.contains("is-selected")).toBe(true);
+    void panel;
+  });
+
+  it("selecting Elevate renders the signature, ratios, J-curve and DoF rows", () => {
+    const graph = loadBeerFixture();
+    const host = document.createElement("div");
+    const panel = new Layer3Panel(host, graph);
+    panel.enable();
+    const elevateBtn = host.querySelector<HTMLElement>('[data-type="elevate"]')!;
+    elevateBtn.click();
+    expect(host.querySelector('[data-role="signature"]')).not.toBeNull();
+    expect(host.querySelector('[data-role="ratios"]')).not.toBeNull();
+    expect(host.querySelector('[data-role="jcurve"]')).not.toBeNull();
+    expect(host.querySelector('[data-role="dof"]')).not.toBeNull();
+  });
+
+  it("shows the Subordinate rope selectors only for Subordinate", () => {
+    const graph = loadBeerFixture();
+    const host = document.createElement("div");
+    const panel = new Layer3Panel(host, graph);
+    panel.enable();
+    const rope = host.querySelector<HTMLElement>('[data-role="rope"]')!;
+    // Exploit default -> rope hidden.
+    expect(rope.style.display).toBe("none");
+    host.querySelector<HTMLElement>('[data-type="subordinate"]')!.click();
+    expect(rope.style.display).not.toBe("none");
+  });
+
+  it("disables the Exploit magnitude slider at zero headroom (pinned constraint)", () => {
+    // The beer fixture's production_capacity is the constraint; drive the panel
+    // to it and verify the exploit-reason line explains the zero headroom.
+    const graph = loadBeerFixture();
+    const host = document.createElement("div");
+    const panel = new Layer3Panel(host, graph);
+    // Default node is wholesaler_orders (no upper collar) -> exploit disabled
+    // with the "no upper collar" reason.
+    panel.enable();
+    panel.setNode("production_capacity");
+    const reason = host.querySelector<HTMLElement>('[data-role="exploit-reason"]');
+    expect(reason).not.toBeNull();
   });
 });

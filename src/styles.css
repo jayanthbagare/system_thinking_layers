@@ -484,6 +484,87 @@ body {
   display: block;
 }
 
+/* ---------- Layer 3 typed ToC interventions (Phase 4) ---------- */
+.layer3-type-group {
+  grid-area: input;
+  display: flex;
+  gap: 4px;
+}
+.layer3-type-group button {
+  flex: 1;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #555;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.layer3-type-group button.is-selected {
+  background: var(--c-delay);
+  border-color: var(--c-delay);
+  color: #fff;
+}
+.layer3-rope select {
+  display: inline-block;
+  width: auto;
+  margin-right: 4px;
+}
+.layer3-reason {
+  grid-area: input;
+  margin: 2px 0 0;
+  color: #b00020;
+  font-size: 11px;
+}
+.layer3-analysis-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 11px;
+}
+.layer3-analysis-title {
+  font-weight: 600;
+  color: #444;
+  min-width: 84px;
+}
+.layer3-sig-chip,
+.layer3-ratio-chip,
+.layer3-jcurve-chip,
+.layer3-dof-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: #f5f5f5;
+  font-variant-numeric: tabular-nums;
+}
+.layer3-sig-chip.is-agree {
+  color: #1b7f3b;
+  background: #e8f6ec;
+}
+.layer3-sig-chip.is-disagree {
+  color: #b00020;
+  background: #fdecec;
+}
+.layer3-ratio-label {
+  color: #777;
+}
+.layer3-ratio-value {
+  font-weight: 600;
+}
+.layer3-jcurve-chip.is-detected {
+  color: #b54708;
+  background: #fff4e5;
+}
+
+
 /* ---------- ABM companion panel ---------- */
 .abm-panel {
   position: fixed;

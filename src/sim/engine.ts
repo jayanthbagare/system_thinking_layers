@@ -442,11 +442,13 @@ export interface TioeSnapshot {
  *     system carries to generate throughput.
  *
  *   - **OE (Operating Expense)** — the rate of resource consumption at
- *     constrained resources. This is the sum of incoming edge rates to collared
- *     stock nodes (nodes with a `collar` block — they have a physical capacity
- *     limit). The flow through a constrained resource is the cost of operating
- *     it. If no nodes are collared, OE = 0 — the model does not represent a
- *     capacity cost.
+ *     constrained resources. For a collared stock with a declared
+ *     `capacity_cost`, OE counts that fixed cost (the cost of *having* the
+ *     capacity, independent of utilization) — so Exploit (collar fixed) holds
+ *     OE flat and Elevate (collar moved, cost scaled) raises OE. When no
+ *     `capacity_cost` is declared, OE falls back to the flow through the
+ *     collared stock (the sum of its incoming edge rates — the Phase 3
+ *     utilization proxy). If no nodes are collared, OE = 0.
  *
  * All three are derived, not annotated. The boundary is computed from the
  * graph (see `src/model/boundary.ts`); the stock/queue mass and edge rates
@@ -487,13 +489,21 @@ export function deriveTioe(graph: Graph, state: SimState): TioeSnapshot {
   }
 
   // --- OE (Operating Expense) ---
-  // Sum of incoming edge rates to collared stock nodes (constrained resources).
-  // The flow through a constraint = the rate at which its capacity is consumed.
+  // For each inside collared node with a declared `capacity_cost`: that fixed
+  // cost (utilization-independent) is the OE — so Exploit (collar fixed) holds
+  // OE flat and Elevate (collar moved, cost scaled) raises OE. For collared
+  // STOCKS without a declared cost, fall back to the flow through the
+  // constraint (sum of incoming rates — the Phase 3 utilization proxy).
   let OE = 0;
   const incomingByNode = groupIncoming(graph);
   for (const n of graph.nodes) {
     if (boundary.has(n.id)) continue;
-    if (n.type !== "stock" || !n.collar) continue;
+    if (!n.collar) continue;
+    if (n.capacity_cost !== undefined) {
+      OE += n.capacity_cost;
+      continue;
+    }
+    if (n.type !== "stock") continue;
     for (const e of incomingByNode.get(n.id) ?? []) {
       if (boundary.has(e.source)) continue;
       OE += Math.abs(edgeRate(e, state.values));
