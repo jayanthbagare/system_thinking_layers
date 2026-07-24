@@ -174,12 +174,18 @@ function stepEuler(graph: Graph, state: SimState, opts: EngineOptions): SimState
   const outgoingByNode = groupOutgoing(graph);
 
   // Phase 2: compute candidate stock values (pre-clamp).
+  // For `approach: "soft"` collars, scale incoming transfer by a smooth ramp
+  // that reaches zero at the upper boundary (Phase 7 §7.1). This makes the
+  // stock approach the ceiling asymptotically — continuously differentiable,
+  // no kink. The hard clamp in Phase 3 remains as a safety net.
   const stockCandidates: Record<string, number> = {};
   for (const n of graph.nodes) {
     if (n.type !== "stock") continue;
     const prev = state.values[n.id] ?? 0;
     let totalIn = 0;
-    for (const e of incomingByNode.get(n.id) ?? []) totalIn += potentialDeliver[e.id];
+    const incoming = incomingByNode.get(n.id) ?? [];
+    const softFactor = softInflowFactor(n, prev);
+    for (const e of incoming) totalIn += potentialDeliver[e.id] * softFactor;
     let totalOut = 0;
     for (const e of outgoingByNode.get(n.id) ?? []) totalOut += rates[e.id] * dt;
     stockCandidates[n.id] = prev + totalIn - totalOut;
@@ -622,4 +628,100 @@ function appendHistory(
     out[id] = prev;
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: soft collar approach + Little's Law
+// ---------------------------------------------------------------------------
+
+/**
+ * Soft inflow scaling factor for a collared stock (Phase 7 §7.1). When
+ * `approach: "soft"` and the current value is in the top 10% of the collar
+ * span, returns a smooth ramp from 1 (at the 90% mark) to 0 (at the upper
+ * boundary). Uses a half-cosine: `0.5 * (1 + cos(pi * progress))`, which is
+ * continuously differentiable at both ends. For `approach: "hard"` or when the
+ * value is below the soft zone, returns 1 (no scaling).
+ */
+export function softInflowFactor(node: Node, value: number): number {
+  const c = node.collar;
+  if (!c || c.approach !== "soft" || c.upper === undefined) return 1;
+  const lower = c.lower ?? 0;
+  const span = c.upper - lower;
+  if (span <= 0) return 1;
+  const softStart = c.upper - 0.1 * span; // top 10% of the span
+  if (value < softStart) return 1;
+  if (value >= c.upper) return 0;
+  const progress = (value - softStart) / (0.1 * span); // 0..1 in the soft zone
+  return 0.5 * (1 + Math.cos(Math.PI * progress));
+}
+
+/**
+ * Little's Law per internal stock (Phase 7 §7.2). For each inside stock node:
+ *   - **L** = stock level + material resident in delay queues feeding it
+ *   - **λ** (lambda) = throughput rate through the stock = sum of outgoing edge rates
+ *   - **W** = L / λ  (wait time / residence time)
+ *   - **ρ** (rho) = current / upper collar  (utilisation; exact with physical collars)
+ *
+ * Pure: a projection over `(graph, state)`. Returns null for λ or ρ when the
+ * values are undefined or the denominator is zero.
+ */
+export interface LittleLawEntry {
+  nodeId: string;
+  label: string;
+  L: number;
+  lambda: number;
+  W: number | null;
+  rho: number | null;
+}
+
+export function littleLaw(graph: Graph, state: SimState): LittleLawEntry[] {
+  const boundary = computeBoundary(graph);
+  const incoming = groupIncoming(graph);
+  const outgoing = groupOutgoing(graph);
+  const entries: LittleLawEntry[] = [];
+  for (const n of graph.nodes) {
+    if (boundary.has(n.id)) continue;
+    if (n.type !== "stock") continue;
+    const L = state.values[n.id] ?? 0;
+    // Queue contents feeding this stock.
+    let queueMass = 0;
+    for (const e of incoming.get(n.id) ?? []) {
+      const q = state.delayQueues[e.id];
+      if (q) for (const v of q) queueMass += v;
+    }
+    const totalL = L + queueMass;
+    // λ = sum of outgoing edge rates (throughput through this stock).
+    let lambda = 0;
+    for (const e of outgoing.get(n.id) ?? []) {
+      lambda += Math.abs(edgeRate(e, state.values));
+    }
+    const W = lambda > 0 ? totalL / lambda : null;
+    const rho = n.collar?.upper !== undefined ? (state.values[n.id] ?? 0) / n.collar.upper : null;
+    entries.push({ nodeId: n.id, label: n.label, L: totalL, lambda, W, rho });
+  }
+  return entries;
+}
+
+/**
+ * Utilisation curve point for the "you are here" marker (Phase 7 §7.3).
+ * Returns W as a function of ρ: `W ∝ ρ/(1−ρ)`. At ρ=0 W=0; as ρ→1 W→∞.
+ * Returns null for ρ >= 1 (beyond the knee — the system is saturated).
+ */
+export function utilisationW(rho: number): number | null {
+  if (rho < 0 || rho >= 1) return null;
+  return rho / (1 - rho);
+}
+
+/**
+ * Sample the utilisation curve at `n` points in [0, 1) for the chart.
+ * Returns arrays of { rho, W } for plotting.
+ */
+export function utilisationCurve(n = 50): { rho: number; W: number }[] {
+  const pts: { rho: number; W: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const rho = i / n; // 0, 1/n, 2/n, ... (n-1)/n — never reaches 1
+    const W = utilisationW(rho);
+    if (W !== null) pts.push({ rho, W });
+  }
+  return pts;
 }

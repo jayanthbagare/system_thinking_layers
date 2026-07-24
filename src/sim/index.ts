@@ -13,11 +13,16 @@ export {
   totalMass,
   computeSlots,
   edgeRate,
+  softInflowFactor,
+  littleLaw,
+  utilisationW,
+  utilisationCurve,
   type Engine,
   type EngineOptions,
   type IntegratorMethod,
   type SimState,
   type TioeSnapshot,
+  type LittleLawEntry,
 } from "./engine";
 export {
   computeSensitivities,
@@ -26,3 +31,19 @@ export {
   DEFAULT_SENSITIVITY_OPTIONS,
   type SensitivityOptions,
 } from "./sensitivity";
+// Phase 8 — robustness of constraint identity.
+export {
+  mulberry32,
+  sampleUniform,
+  sampleGraphs,
+  runMonteCarlo,
+  verdictFor,
+  verdictMessage,
+  DEFAULT_SAMPLER_OPTIONS,
+  type SamplerOptions,
+  type SampledGraph,
+  type NodeStability,
+  type RobustnessReport,
+  type StabilityVerdict,
+  type SamplingSource,
+} from "./robustness";

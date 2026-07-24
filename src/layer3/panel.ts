@@ -23,6 +23,8 @@
  */
 
 import type { Graph, Node } from "@/model/types";
+import { littleLaw, utilisationCurve } from "@/sim";
+import { initialState } from "@/sim";
 import {
   simulate,
   simulateTyped,
@@ -607,6 +609,7 @@ export class Layer3Panel {
     wrap.append(this.renderRatiosRow(result));
     wrap.append(this.renderJCurveRow(result));
     wrap.append(this.renderDofRow(result));
+    wrap.append(this.renderLittleLaw());
   }
 
   private renderRaw(wrap: HTMLElement): void {
@@ -798,6 +801,66 @@ export class Layer3Panel {
       "Higher tiers move T/I/OE more per unit of OE. ToC's Exploit-before-Elevate discipline is the claim that tier 1 must be exhausted before tier 2 is paid for.";
     row.append(chip);
     return row;
+  }
+
+  private renderLittleLaw(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "layer3-analysis-row layer3-littleslaw";
+    section.dataset.role = "littleslaw";
+    const title = document.createElement("span");
+    title.className = "layer3-analysis-title";
+    title.textContent = "Little's Law";
+    section.append(title);
+
+    const entries = littleLaw(this.graph, this.buildCurrentState());
+    if (entries.length === 0) {
+      const note = document.createElement("span");
+      note.textContent = "No internal stocks.";
+      section.append(note);
+      return section;
+    }
+
+    const grid = document.createElement("table");
+    grid.className = "layer3-ll-table";
+    const head = document.createElement("tr");
+    for (const h of ["Node", "L (WIP)", "\u03bb (rate)", "W (latency)", "\u03c1 (util)"]) {
+      const th = document.createElement("th");
+      th.textContent = h;
+      head.append(th);
+    }
+    grid.append(head);
+    for (const e of entries) {
+      const tr = document.createElement("tr");
+      const labelCell = document.createElement("td");
+      labelCell.textContent = e.label;
+      const lCell = document.createElement("td");
+      lCell.textContent = e.L.toFixed(1);
+      const lambdaCell = document.createElement("td");
+      lambdaCell.textContent = e.lambda.toFixed(1);
+      const wCell = document.createElement("td");
+      wCell.textContent = e.W === null ? "\u2014" : e.W.toFixed(2);
+      const rhoCell = document.createElement("td");
+      rhoCell.textContent = e.rho === null ? "\u2014" : e.rho.toFixed(2);
+      if (e.rho !== null && e.rho >= 0.8) rhoCell.className = "is-saturated";
+      tr.append(labelCell, lCell, lambdaCell, wCell, rhoCell);
+      grid.append(tr);
+    }
+    section.append(grid);
+
+    // Utilisation curve note.
+    const curveNote = document.createElement("p");
+    curveNote.className = "layer3-ll-note";
+    const curve = utilisationCurve(50);
+    curveNote.textContent =
+      "W \u221d \u03c1/(1\u2212\u03c1): at \u03c1=0.8 W=4, at \u03c1=0.9 W=9, at \u03c1=0.95 W=19. The knee is the constraint made visible.";
+    section.append(curveNote);
+    void curve;
+    return section;
+  }
+
+  /** Build a SimState from the engine for the Little's Law snapshot. */
+  private buildCurrentState() {
+    return initialState(this.graph, this.engineOpts());
   }
 
   // --- sync helpers ------------------------------------------------------

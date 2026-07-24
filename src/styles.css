@@ -494,6 +494,105 @@ body {
   font-weight: 600;
 }
 
+/* ---------- Layer 3 Little's Law (Phase 7) ---------- */
+.layer3-littleslaw {
+  flex-direction: column;
+  align-items: stretch;
+}
+.layer3-ll-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.layer3-ll-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #777;
+  padding: 2px 6px;
+  border-bottom: 1px solid #eee;
+}
+.layer3-ll-table td {
+  padding: 2px 6px;
+  border-bottom: 1px solid #f5f5f5;
+}
+.layer3-ll-table td.is-saturated {
+  color: #b00020;
+  font-weight: 600;
+}
+.layer3-ll-note {
+  font-size: 11px;
+  color: #777;
+  margin: 4px 0 0;
+}
+
+/* ---------- Layer 2 robustness (Phase 8) ---------- */
+.layer2-robustness {
+  border-top: 1px solid #eee;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+.layer2-robustness-btn {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  margin: 4px 0;
+}
+.layer2-robustness-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.layer2-robustness-verdicts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0;
+}
+.layer2-robustness-verdict {
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.layer2-robustness-verdict.is-stable {
+  color: #1b7f3b;
+  background: #e8f6ec;
+}
+.layer2-robustness-verdict.is-likely {
+  color: #b54708;
+  background: #fff4e5;
+}
+.layer2-robustness-verdict.is-unstable {
+  color: #b00020;
+  background: #fdecec;
+}
+.layer2-robustness-sources {
+  font-size: 11px;
+  color: #777;
+  margin: 2px 0;
+}
+.layer2-robustness-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.layer2-robustness-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #777;
+  padding: 2px 4px;
+  border-bottom: 1px solid #eee;
+}
+.layer2-robustness-table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
 /* ---------- Layer 3 side panel ---------- */
 .layer3-panel {
   position: fixed;

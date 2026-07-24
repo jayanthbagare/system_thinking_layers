@@ -211,3 +211,50 @@ moves T/I/OE per unit of OE:
 Collars gave us a clean tier 2: moving a wall is categorically distinct from
 moving within the walls, and ToC's Exploit-before-Elevate discipline is exactly
 the claim that tier 1 must be exhausted before tier 2 is paid for.
+
+## Saturation and Little's Law (Phase 7)
+
+The collar owns the ceiling — there is no separate saturation mechanism. Where
+a soft approach is wanted, express it on the collar:
+
+- `approach: hard` (default) — the value clips at the boundary (a kink).
+- `approach: soft` — within the top 10% of the collar span, the effective
+  inflow is scaled by a half-cosine ramp from 1 (at the 90% mark) to 0 (at the
+  ceiling). The collar is still the ceiling; only the approach is rounded. This
+  makes the stock approach the ceiling asymptotically — continuously
+  differentiable, no kink (see `softInflowFactor` in `src/sim/engine.ts`).
+
+**Little's Law** (per internal stock, in the L3 panel): **L** (stock level +
+queue contents feeding it), **λ** (throughput rate through the stock = sum of
+outgoing edge rates), **W = L/λ** (residence time / latency), and **ρ =
+current / upper collar** (utilisation — exact with physical collars). The
+utilisation curve **W ∝ ρ/(1−ρ)** is plotted with a "you are here" marker; a
+node at ρ = 0.94 on the steep section communicates more in one glance than any
+score. Architect vocabulary (WIP / latency) is used in this panel only — TA's
+vocabulary stays intact in the TA panel.
+
+## Robustness of constraint identity (Phase 8)
+
+A point estimate of the constraint is a weak input to an architecture decision;
+its stability is a strong one. The `range:` construct (§2.2) means sampled
+uncertainty is **declared by the modeller** rather than invented by the tool.
+
+**Monte Carlo** (default N = 200, seeded for determinism): for each draw,
+`src/sim/robustness.ts` samples within declared `range:` where present, and
+falls back to ±X% (default 20%) for undeclared properties — marking those as
+"guessed" so the user sees how much of the reported uncertainty is their
+statement versus the tool's guess.
+
+**Stability report**: the percentage of draws in which each node is #1,
+reported separately for predicted (score) and observed (pinned fraction).
+Verdicts (spec §8.2):
+
+- ≥ 90% one node → *"Stable. Act on it."*
+- 60–90% → *"Likely, but check the runner-up."*
+- < 60%, or two nodes trading places → *"Unstable. You are near a bifurcation
+  in the constraint landscape — optimising either node is a bet on parameters
+  you do not actually know. Reduce uncertainty before spending."*
+
+The same treatment applies to intervention ranking: if two interventions are
+within noise on ΔT/ΔOE, the report says so rather than presenting a spurious
+ordering.

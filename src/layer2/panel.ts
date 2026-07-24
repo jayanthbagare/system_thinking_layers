@@ -24,7 +24,7 @@ import {
   type CycleDetection,
 } from "@/layer2/migration";
 import { heatColor } from "@/layer1/layout";
-import { normalizedSensitivities } from "@/sim";
+import { normalizedSensitivities, runMonteCarlo, verdictMessage, type RobustnessReport } from "@/sim";
 import { DEFAULT_ENGINE_OPTIONS, type EngineOptions } from "@/sim";
 import type { Layer1Renderer } from "@/layer1/renderer";
 
@@ -148,6 +148,7 @@ export class Layer2Panel {
     this.host.append(this.renderRanking());
     this.host.append(this.renderPredictedVsObserved());
     this.host.append(this.renderMigration());
+    this.host.append(this.renderRobustness());
   }
 
   private renderHeader(): HTMLElement {
@@ -417,6 +418,92 @@ export class Layer2Panel {
   private labelOf(id: string | null): string {
     if (!id) return "—";
     return this.graph.nodes.find((n) => n.id === id)?.label ?? id;
+  }
+
+  // --- robustness (Phase 8 §8.2) ----------------------------------------
+
+  private renderRobustness(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "layer2-robustness";
+    section.dataset.role = "robustness";
+
+    const title = document.createElement("p");
+    title.className = "layer2-caption";
+    title.textContent = "Robustness (Monte Carlo)";
+    section.append(title);
+
+    const runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.textContent = "Run robustness check";
+    runBtn.className = "layer2-robustness-btn";
+    runBtn.dataset.role = "robustness-run";
+    runBtn.addEventListener("click", () => {
+      runBtn.disabled = true;
+      runBtn.textContent = "Running...";
+      // Defer to allow the button to update.
+      setTimeout(() => {
+        const report = runMonteCarlo(this.graph, this.weights, this.ensureSensitivities(), { n: 200 });
+        this.populateRobustness(section, report);
+        runBtn.disabled = false;
+        runBtn.textContent = "Re-run";
+      }, 0);
+    });
+    section.append(runBtn);
+
+    const results = document.createElement("div");
+    results.dataset.role = "robustness-results";
+    section.append(results);
+
+    return section;
+  }
+
+  private populateRobustness(section: HTMLElement, report: RobustnessReport): void {
+    const results = section.querySelector<HTMLElement>('[data-role="robustness-results"]');
+    if (!results) return;
+    results.innerHTML = "";
+
+    // Verdict chips.
+    const verdictRow = document.createElement("div");
+    verdictRow.className = "layer2-robustness-verdicts";
+    const predChip = document.createElement("div");
+    predChip.className = `layer2-robustness-verdict is-${report.predictedVerdict}`;
+    predChip.textContent = `Predicted: ${verdictMessage(report.predictedVerdict)}`;
+    verdictRow.append(predChip);
+    const obsChip = document.createElement("div");
+    obsChip.className = `layer2-robustness-verdict is-${report.observedVerdict}`;
+    obsChip.textContent = `Observed: ${verdictMessage(report.observedVerdict)}`;
+    verdictRow.append(obsChip);
+    results.append(verdictRow);
+
+    // Declared vs guessed summary.
+    const sourceRow = document.createElement("p");
+    sourceRow.className = "layer2-robustness-sources";
+    sourceRow.textContent = `N=${report.n}: ${report.declaredCount} declared, ${report.guessedCount} guessed (\u00b120%)`;
+    results.append(sourceRow);
+
+    // Per-node table.
+    const table = document.createElement("table");
+    table.className = "layer2-robustness-table";
+    const head = document.createElement("tr");
+    for (const h of ["Node", "Pred %", "Obs %"]) {
+      const th = document.createElement("th");
+      th.textContent = h;
+      head.append(th);
+    }
+    table.append(head);
+    for (const n of report.nodes) {
+      if (n.predictedFraction === 0 && n.observedFraction === 0) continue;
+      const tr = document.createElement("tr");
+      const tdName = document.createElement("td");
+      tdName.textContent = n.label;
+      const tdPred = document.createElement("td");
+      tdPred.textContent = `${(n.predictedFraction * 100).toFixed(0)}%`;
+      const tdObs = document.createElement("td");
+      tdObs.textContent = `${(n.observedFraction * 100).toFixed(0)}%`;
+      tr.append(tdName, tdPred, tdObs);
+      table.append(tr);
+    }
+    results.append(table);
   }
 
   private syncSliderValues(): void {
