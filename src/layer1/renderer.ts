@@ -152,7 +152,6 @@ export class Layer1Renderer {
   /** Badge layer sits above signalLayer so polarity/delay text is never
    * obscured by the traveling dot circles. */
   private readonly badgeLayer: Selection<SVGGElement, unknown, null, unknown>;
-  private readonly signalLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly nodeLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly labelLayer: Selection<SVGGElement, unknown, null, unknown>;
   private readonly migrationLayer: Selection<SVGGElement, unknown, null, unknown>;
@@ -217,12 +216,9 @@ export class Layer1Renderer {
     this.svg.attr("viewBox", `0 0 ${opts.width} ${opts.height}`);
 
     // A single zoomable group holds all layers so pan/zoom is unified.
-    // Z-order (back to front): edges → signal dots → badge text → nodes → labels → migration.
-    // Badges must sit above signal dots so the polarity +/− and delay numbers
-    // are never obscured by the traveling blue circles.
+    // Z-order (back to front): edges → badge text → nodes → labels → migration.
     this.root = this.svg.append("g").attr("class", "layer1-root");
     this.linkLayer = this.root.append("g").attr("class", "layer1-links");
-    this.signalLayer = this.root.append("g").attr("class", "layer1-signals");
     this.badgeLayer = this.root.append("g").attr("class", "layer1-badges");
     this.nodeLayer = this.root.append("g").attr("class", "layer1-nodes");
     this.labelLayer = this.root.append("g").attr("class", "layer1-loop-labels");
@@ -391,39 +387,11 @@ export class Layer1Renderer {
    * read distinctly.
    */
   private drawSignals(): void {
-    if (!this.engine) return;
-    const edgeById = new Map(this.simEdges.map((e) => [e.id, e]));
-    this.signalLayer.selectAll("*").remove();
     // Clear nudge fx from badgeLayer each frame (permanent badge g.edge-badge
     // elements stay; only ephemeral nudge-ring / nudge-pulse circles are removed).
     this.badgeLayer.selectAll(".nudge-ring, .nudge-pulse").remove();
-    const pulses: { edge: SimEdge; frac: number; sign: "pos" | "neg" }[] = [];
-    for (const [eid, q] of Object.entries(this.engine.state.delayQueues)) {
-      const e = edgeById.get(eid);
-      if (!e || q.length === 0) continue;
-      const slots = q.length;
-      for (let i = 0; i < slots; i++) {
-        const chunk = q[i];
-        if (chunk === 0) continue;
-        pulses.push({ edge: e, frac: (i + 0.5) / slots, sign: chunk >= 0 ? "pos" : "neg" });
-      }
-    }
-    if (pulses.length === 0) return;
-    const dots = this.signalLayer
-      .selectAll<SVGCircleElement, (typeof pulses)[number]>("circle.signal")
-      .data(pulses)
-      .enter()
-      .append("circle")
-      .attr("class", "signal")
-      .attr("r", 5);
-    dots.each((d, i, groups) => {
-      const el = groups[i];
-      const sx = d.edge.source.x + (d.edge.target.x - d.edge.source.x) * d.frac;
-      const sy = d.edge.source.y + (d.edge.target.y - d.edge.source.y) * d.frac;
-      el.setAttribute("cx", String(sx));
-      el.setAttribute("cy", String(sy));
-      el.setAttribute("data-sign", d.sign);
-    });
+    // Delay-pipeline dots removed: hash marks + delay number badge already
+    // communicate delay; the dot wall was visual noise that obscured badges.
   }
 
   /**
@@ -467,14 +435,10 @@ export class Layer1Renderer {
   }
 
   /**
-   * Draw the nudge feedback onto the signal layer: an expanding, fading "ping"
-   * ring on the nudged node (wall-clock, so it always plays — even on flow nodes
-   * whose impulse is overwritten on the next engine step, and on undelayed
-   * graphs where there are no delay-queue dots), plus a single dot traveling
-   * along each outgoing edge. Both are wall-clock driven so they move smoothly
-   * every frame — independent of the slow-motion engine stepping — and read as
-   * one moving dot rather than the many static delay-pipeline dots. The signal
-   * layer is cleared each frame by `drawSignals`, so this appends fresh per tick.
+   * Draw the nudge feedback onto the badge layer: an expanding, fading "ping"
+   * ring on the nudged node, plus a single dot traveling along each outgoing
+   * edge. Both are wall-clock driven so they move smoothly every frame —
+   * independent of the slow-motion engine stepping.
    */
   private drawNudgeFx(now: number): void {
     if (!this.nudgeRing && this.nudgePulses.length === 0) return;
