@@ -248,13 +248,30 @@ export function valueRadiusFraction(value: number): number {
  *
  * `REST` matches `signal.REST_VALUE` (0.5); duplicated here to keep layout
  * free of a dependency on the signal engine.
+ *
+ * `palette` lets callers inject theme-resolved colors (the renderer reads the
+ * CSS tokens via `cssVar`); the defaults are the light-theme accents so the
+ * function stays pure and unit-testable without a DOM.
  */
-export function valueColor(value: number): { fill: string; opacity: number } {
+export interface ValuePalette {
+  reinforcing: string;
+  balancing: string;
+}
+
+const DEFAULT_VALUE_PALETTE: ValuePalette = {
+  reinforcing: "#2e7d32",
+  balancing: "#c62828",
+};
+
+export function valueColor(
+  value: number,
+  palette: ValuePalette = DEFAULT_VALUE_PALETTE,
+): { fill: string; opacity: number } {
   const REST = 0.5;
   const d = value - REST;
   const mag = Math.min(1, Math.abs(d));
   const opacity = 0.3 + 0.55 * mag; // 0.30 at rest → 0.85 at full deviation
-  const fill = d >= 0 ? "#2e7d32" : "#c62828"; // --c-reinforcing / --c-balancing
+  const fill = d >= 0 ? palette.reinforcing : palette.balancing;
   return { fill, opacity };
 }
 

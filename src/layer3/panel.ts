@@ -43,9 +43,16 @@ import { sparkline, type SparklineSeries } from "@/layer3";
 import { DEFAULT_WEIGHTS, topConstraints, type Weights } from "@/layer2/scoring";
 import type { ScenarioTray } from "@/scenario";
 import { emptyTray } from "@/scenario";
+import { cssVar } from "@/ui";
 
-const PRE_COLOR = "#9e9e9e";
-const POST_COLOR = "#1976d2";
+/** Pre-intervention baseline color (resolves through the theme cascade). */
+function preColor(): string {
+  return cssVar("--c-pre", "#9e9e9e");
+}
+/** Post-intervention accent color (the delay/primary accent). */
+function postColor(): string {
+  return cssVar("--c-delay", "#1976d2");
+}
 const STEPS_DEFAULT = 200;
 const DT_DEFAULT = 0.1;
 const MAGNITUDE_DEFAULT = 20;
@@ -705,8 +712,8 @@ export class Layer3Panel {
 
     const xs = pre.map((_, i) => i);
     const series: SparklineSeries[] = [
-      { label: "pre", color: PRE_COLOR, points: pre.map((s, i) => ({ x: xs[i], y: s[meta.key] })) },
-      { label: "post", color: POST_COLOR, points: post.map((s, i) => ({ x: xs[i], y: s[meta.key] })) },
+      { label: "pre", color: preColor(), points: pre.map((s, i) => ({ x: xs[i], y: s[meta.key] })) },
+      { label: "post", color: postColor(), points: post.map((s, i) => ({ x: xs[i], y: s[meta.key] })) },
     ];
     const sl = sparkline(series, { width: 260, height: 48 });
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");

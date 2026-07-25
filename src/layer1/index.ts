@@ -16,6 +16,8 @@ export {
   shortenToCircleBounds,
   arrowHead,
   valueRadiusFraction,
+  valueColor,
   type EdgeGeometry,
   type Point,
+  type ValuePalette,
 } from "./layout";

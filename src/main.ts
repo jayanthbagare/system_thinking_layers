@@ -16,7 +16,7 @@ import { Layer2Panel, type MigrationTrail, recordMigrationStep } from "@/layer2"
 import { Layer3Panel } from "@/layer3";
 import type { TypedIntervention } from "@/layer3";
 import { AbmPanel } from "@/abm";
-import { LayerSwitcher, type LayerControl } from "@/ui";
+import { LayerSwitcher, ThemeSwitcher, type LayerControl } from "@/ui";
 import { downloadSession, downloadGraphYaml, uploadSession } from "@/io";
 import { serializeGraphYaml } from "@/dsl/parser";
 import { DEFAULT_ENGINE_OPTIONS } from "@/sim";
@@ -270,6 +270,19 @@ function main(): void {
   switcherHost.className = "layer-switcher-host";
   root.append(switcherHost);
   const switcher = new LayerSwitcher(switcherHost);
+
+  // --- Theme switcher (Light / System / Dark) ----------------------------
+  const themeHost = document.createElement("nav");
+  themeHost.className = "theme-switcher-host";
+  root.append(themeHost);
+  const themeSwitcher = new ThemeSwitcher(themeHost);
+  themeSwitcher.mount();
+  void themeSwitcher;
+  // Re-render the canvas when the theme changes so JS-computed SVG colors
+  // (value circles, monitor sparklines) re-resolve against the new tokens.
+  window.addEventListener("layers:theme", () => {
+    renderer.render(graph);
+  });
 
   // Layer 1 is always active (the CLD itself); overlays toggle on top.
   const l1Ctrl: LayerControl = {

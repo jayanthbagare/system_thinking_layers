@@ -38,12 +38,14 @@ import {
   polaritySymbol,
   shortenToCircleBounds,
   valueColor,
+  type ValuePalette,
   valueRadiusFraction,
   type Point,
 } from "./layout";
 import { createEngine, degreesOfFreedom, equilibrium, type Engine, type EngineOptions } from "@/sim";
 import { sparkline, type SparklineSeries } from "@/layer3";
 import { openEditModal, type NodeEditPatch } from "./editModal";
+import { cssVar } from "@/ui";
 
 /** A node as consumed by the simulation — model node + transient layout state. */
 export interface SimNode {
@@ -571,6 +573,10 @@ export class Layer1Renderer {
   private styleNodeValues(): void {
     if (!this.engine) return;
     const eq = this.equilib ?? {};
+    const palette: ValuePalette = {
+      reinforcing: cssVar("--c-reinforcing", "#2e7d32"),
+      balancing: cssVar("--c-balancing", "#c62828"),
+    };
     this.nodeLayer
       .selectAll<SVGGElement, SimNode>("g.node")
       .each((d, i, groups) => {
@@ -579,7 +585,7 @@ export class Layer1Renderer {
         const scale = Math.max(Math.abs(rest), Math.abs(this.initialOf(d.id)), 1);
         const norm = 0.5 + 0.5 * clamp((raw - rest) / scale, -1, 1);
         const frac = valueRadiusFraction(norm);
-        const { fill, opacity } = valueColor(norm);
+        const { fill, opacity } = valueColor(norm, palette);
         const circle = select(groups[i]).select(".node-value-circle");
         circle
           .attr("r", NODE_RADIUS * frac)
@@ -724,6 +730,12 @@ export class Layer1Renderer {
           ? [this.trackedNodeId]
           : [];
 
+    const valuePalette: ValuePalette = {
+      reinforcing: cssVar("--c-reinforcing", "#2e7d32"),
+      balancing: cssVar("--c-balancing", "#c62828"),
+    };
+    const delayColor = cssVar("--c-delay", "#1976d2");
+
     for (const id of nodeIds) {
       const node = this.graph.nodes.find((n) => n.id === id);
       if (!node) continue;
@@ -732,8 +744,8 @@ export class Layer1Renderer {
       const rest = eq[id] ?? 0;
       const scale = Math.max(Math.abs(rest), Math.abs(this.initialOf(id)), 1);
       const norm = 0.5 + 0.5 * clamp((current - rest) / scale, -1, 1);
-      const { fill } = valueColor(norm);
-      const slColor = this.monitorMetric === "cumulative" ? "#1976d2" : fill;
+      const { fill } = valueColor(norm, valuePalette);
+      const slColor = this.monitorMetric === "cumulative" ? delayColor : fill;
       const displayVal =
         this.monitorMetric === "cumulative"
           ? (this.cumulative.get(id) ?? 0).toFixed(2)
