@@ -31,13 +31,19 @@ Add Graph data model with structural validation
 
 | Concern | Location |
 |---|---|
-| Data model | `src/model/` |
-| DSL parsing | `src/dsl/` |
-| Cycle enumeration | `src/graph/` (Phase 2) |
-| Layer 1 renderer | `src/layer1/` (Phase 2) |
-| Pure logic + unit tests | `tests/unit/` |
-| Cross-module flows | `tests/integration/` |
-| Full user journeys | `tests/e2e/` (Phase 2+) |
+| Data model + validation | `src/model/` |
+| DSL parsing (YAML/JSON) | `src/dsl/` |
+| Cycle enumeration + loops | `src/graph/` |
+| Simulation engine (collars, delays, T/I/OE) | `src/sim/` |
+| Layer 1 renderer (D3, edit modal) | `src/layer1/` |
+| Layer 2 scoring + migration trail | `src/layer2/` |
+| Layer 3 interventions + panel | `src/layer3/` |
+| ABM engine, worker, validation, panel | `src/abm/` |
+| Scenario tray + ADR export | `src/scenario/` |
+| Session save/load | `src/io/` |
+| UI shell (layer switcher, theme switcher) | `src/ui/` |
+| Built-in fixtures | `public/examples/`, `src/fixtures/` |
+| Unit tests (pure logic + DOM) | `tests/unit/` |
 
 ## Architecture rules (do not violate)
 
