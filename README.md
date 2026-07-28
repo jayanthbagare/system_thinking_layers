@@ -152,6 +152,7 @@ going clockwise:
 ┌──────────────────────────────────────────────────────┐
 │  [L1: CLD] [L2: Constraints] [L3: T/I/OE] [ABM]      │  ← Layer switcher (top-left)
 │             [Pause] [Reset]  Hover a node, click ▲/▼ │  ← Play bar (top-center)
+│  [Light][System][Dark]                               │  ← Theme switcher (top-right)
 │                                                      │
 │                                       ┌────────────┐ │
 │            MAIN CANVAS                │ L2 / L3 /   │ │  ← Side panel (top-right)
@@ -163,7 +164,7 @@ going clockwise:
 │         ▼ (up = +, down = −)          │            │ │
 │                                       └────────────┘ │
 │                                                      │
-│  [Save session] [Load session]                       │  ← Session bar (bottom-left)
+│  [Save session] [Load session] [Upload scenario]      │  ← Session bar (bottom-left)
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -242,8 +243,28 @@ A **Value / Cumulative** toggle in the monitor header switches the metric:
 
 ### The session bar (bottom-left)
 
-Two buttons: **Save session** and **Load session**. These let you save
-your entire workspace to a file and restore it later. Details in section 10.
+Three buttons: **Save session**, **Load session**, and **Upload scenario**. The
+first two let you save your entire workspace to a file and restore it later;
+**Upload scenario** loads a brand-new YAML model into the running app across
+all three layers. Details in section 10.
+
+### The theme switcher (top-right)
+
+A three-button toolbar — **Light**, **System**, **Dark** — that controls
+the color scheme of the entire app: canvas background, node fills, loop
+colors, panel chrome, and the live node monitor sparklines. The choice
+persists across sessions in `localStorage` (key `layers.theme`).
+
+| Choice    | Behavior                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------- |
+| **Light** | Forces the light palette regardless of OS setting.                                               |
+| **System** (default) | Follows the OS `prefers-color-scheme` setting live — if you flip your OS to dark mode, the app re-resolves without a reload. |
+| **Dark**  | Forces the dark palette.                                                                          |
+
+All colors are CSS custom-property tokens, so the switch is instant and
+the canvas re-renders its JS-computed SVG colors (value circles, monitor
+sparklines) on the `layers:theme` event. The toolbar is a keyboard-
+accessible `role="group"` with `aria-pressed` state on the active button.
 
 ---
 
@@ -963,6 +984,26 @@ session JSON file. The app:
 
 If the file is invalid, you see an alert explaining the problem.
 
+### Upload scenario
+
+Click **Upload scenario** (next to Save/Load session, bottom-left). A file
+picker opens accepting `.yaml`, `.yml`, or `.json` model files. The app:
+
+1. Parses the file with the same DSL parser used at startup, collecting every
+   violation before failing.
+2. Computes loops from the edges (never trusts the file).
+3. Replaces the working graph **in place** — the single source of truth that
+   Layer 1, Layer 2, Layer 3, and the ABM companion all reference — and
+   re-renders the canvas.
+4. Resets view state to a clean baseline: Layer 2 weights to defaults,
+   sensitivities invalidated, Layer 3 scenario tray emptied, and the Phase 5
+   migration trail and its arcs cleared.
+
+This is the fastest way to load a brand-new model into the running app. The
+upload accepts the same schema documented in [§11 Authoring Your Own Model](#11-authoring-your-own-model);
+any fixture in `public/examples/` can be uploaded directly. If the file is
+invalid, an alert explains the error and nothing changes.
+
 ### When to use this
 
 - **Experimenting with weights:** Save a session with one set of weights,
@@ -970,14 +1011,25 @@ If the file is invalid, you see an alert explaining the problem.
 - **Sharing a model:** Send the JSON file to a colleague. They open it
   with Load session and see exactly what you see.
 - **Resuming work:** Save before closing the browser; load to continue.
+- **Loading a new model:** Use Upload scenario to swap in a different YAML
+  model without restarting the dev server.
 
 ---
 
 ## 11. Authoring Your Own Model
 
-You create a model by writing a YAML text file. The app ships with one
-example at `public/examples/beer-distribution.yaml`. Here is how to write
-your own.
+You create a model by writing a YAML text file. The app ships with five
+example fixtures in `public/examples/`:
+
+| Fixture                         | What it models                                                          |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| `beer-distribution.yaml`        | The classic bullwhip supply chain (the default on startup).            |
+| `drum-buffer-rope.yaml`         | A DBR production system with an explicit constraint.                   |
+| `cicd-pipeline.yaml`            | A CI/CD delivery pipeline with feedback loops.                         |
+| `request-path.yaml`             | A request-handling path with capacity collars.                         |
+| `agentic-verification-loop.yaml`| An agentic verification loop with reinforcing feedback.                |
+
+Here is how to write your own.
 
 ### What is YAML?
 
@@ -1198,6 +1250,10 @@ The app is designed to be fully usable without a mouse.
   line position _and_ delta badges. ABM verdicts use color _and_ text
   status. If you cannot distinguish colors, you can still read every
   score and verdict.
+- **Theme** — Light / System / Dark (see section 4). Both palettes are
+  calibrated for WCAG-AA contrast on text and UI controls. System follows
+  the OS `prefers-color-scheme` so users who already prefer dark mode get
+  it automatically with no opt-in.
 - **ARIA roles** — the layer switcher is a proper tablist, the canvas
   has an image role with a text label, and panels are labeled regions.
   Screen readers can announce them.
@@ -1288,6 +1344,13 @@ can disconnect from the internet and everything — drawing, scoring,
 simulating, ABM, saving — continues to work. This is by design: there is
 no backend.
 
+### "Does the app remember my theme choice?"
+
+Yes. The Light / System / Dark choice (top-right) is saved in
+`localStorage` under `layers.theme` and reapplied on every visit. **System**
+tracks your OS setting live — flip your OS between light and dark mode and
+the app follows without a reload.
+
 ### "How many nodes can the app handle?"
 
 The app is designed for models up to about 50 nodes and 150 edges. At
@@ -1333,5 +1396,7 @@ RK4 (if not already) or decrease the step size.
 - [DSL Reference](./docs/dsl-reference.md) — the complete YAML grammar.
 - [Data Model](./docs/data-model.md) — the TypeScript types and validation
   rules.
+- [Theory of Constraints & Throughput Accounting](./docs/toc-and-ta.md) —
+  the ideas behind Layer 2 and Layer 3 (Five Focusing Steps, T/I/OE).
 - [Architecture Spec](./prompt.md) — the original design document.
 - [Development Plan](./PLAN.md) — build phases, testing, and deployment.

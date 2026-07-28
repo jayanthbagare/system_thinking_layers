@@ -17,7 +17,7 @@ import { Layer3Panel } from "@/layer3";
 import type { TypedIntervention } from "@/layer3";
 import { AbmPanel } from "@/abm";
 import { LayerSwitcher, ThemeSwitcher, type LayerControl } from "@/ui";
-import { downloadSession, downloadGraphYaml, uploadSession } from "@/io";
+import { downloadSession, downloadGraphYaml, uploadSession, uploadGraphYaml } from "@/io";
 import { serializeGraphYaml } from "@/dsl/parser";
 import { DEFAULT_ENGINE_OPTIONS } from "@/sim";
 import {
@@ -409,7 +409,47 @@ function main(): void {
         });
     }
   });
-  ioHost.append(saveBtn, loadBtn, fileInput);
+  // Upload a YAML model file as a new scenario across L1/L2/L3 (and ABM).
+  // Resets weights, scenario tray, and migration trail because a freshly
+  // loaded model has no associated session state (mirrors `loadGraphYaml`).
+  const uploadBtn = document.createElement("button");
+  uploadBtn.type = "button";
+  uploadBtn.textContent = "Upload scenario";
+  const yamlInput = document.createElement("input");
+  yamlInput.type = "file";
+  yamlInput.accept = "text/yaml,.yaml,.yml,application/json,.json";
+  yamlInput.style.display = "none";
+  uploadBtn.addEventListener("click", () => yamlInput.click());
+  yamlInput.addEventListener("change", () => {
+    const file = yamlInput.files?.[0];
+    if (!file) return;
+    uploadGraphYaml(file)
+      .then((next) => {
+        graph.nodes = next.nodes;
+        graph.edges = next.edges;
+        graph.loops = next.loops;
+        weights = {
+          in_degree: 1,
+          delay_ratio: 1,
+          rate_mismatch: 1,
+          dominant_loop: 1,
+          sensitivity: 1,
+        };
+        scenarioTray = emptyTray();
+        migrationTrail = [];
+        renderer.drawMigrationArcs([]);
+        renderer.render(graph);
+        l2.invalidate();
+        l2.setWeights(weights);
+        l2.setMigrationTrail(migrationTrail);
+        l3.setWeights(weights);
+        l3.setTray(scenarioTray);
+      })
+      .catch((err: unknown) => {
+        window.alert(`Failed to load scenario: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  });
+  ioHost.append(saveBtn, loadBtn, fileInput, uploadBtn, yamlInput);
   root.append(ioHost);
 
   // --- Resize ------------------------------------------------------------

@@ -193,8 +193,13 @@ export class Layer1Renderer {
   private monitorMode: "all" | "single" = "single";
   private monitorMetric: "value" | "cumulative" = "value";
   private static readonly HISTORY_CAP = 200;
-  /** Show a sparkline per node when the graph is small enough to fit. */
-  private static readonly ALL_NODES_THRESHOLD = 7;
+  /** Show a sparkline per node when the graph is small enough to fit. The
+   * comparison is `<`, so a graph with up to (threshold − 1) nodes uses "all"
+   * mode; only strictly larger graphs collapse to single-node mode. Set to 9
+   * so all shipped example models (up to 8 nodes, e.g. the agentic verification
+   * loop and the CI/CD pipeline) show every node's sparkline rather than a
+   * single (often flat, boundary) tracked node. */
+  private static readonly ALL_NODES_THRESHOLD = 9;
 
   /** Post-nudge slow motion: the live loop steps the engine at a fractional
    * rate (`timeScale`), accumulated in `stepAcc`. 1 = full speed; <1 = slow.

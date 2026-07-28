@@ -15,9 +15,10 @@ runs in the browser with no backend.
 5. [Layer 3 — T/I/OE Simulation](#5-layer-3--tioe-simulation)
 6. [ABM Companion View](#6-abm-companion-view)
 7. [Layer Switcher](#7-layer-switcher)
-8. [Session Save / Load](#8-session-save--load)
-9. [Keyboard & Accessibility](#9-keyboard--accessibility)
-10. [Programmatic API](#10-programmatic-api)
+8. [Theme](#8-theme)
+9. [Session Save / Load](#9-session-save--load)
+10. [Keyboard & Accessibility](#10-keyboard--accessibility)
+11. [Programmatic API](#11-programmatic-api)
 
 ---
 
@@ -38,7 +39,7 @@ Other useful commands:
 npm run typecheck   # tsc --noEmit (strict mode)
 npm run lint        # eslint
 npm test            # vitest — 335 unit tests
-npm run build       # production build → dist/ (~70 KB gzipped + 2 KB worker)
+npm run build       # production build → dist/ (~71 KB JS + 4.5 KB CSS gzipped + 2 KB worker)
 ```
 
 ---
@@ -47,9 +48,11 @@ npm run build       # production build → dist/ (~70 KB gzipped + 2 KB worker)
 
 Graphs are authored in YAML (or JSON) **before** any visuals are wired up.
 This keeps the focus on structure, not layout. See
-[`docs/dsl-reference.md`](./dsl-reference.md) for the full grammar and
-[`public/examples/beer-distribution.yaml`](../public/examples/beer-distribution.yaml)
-for a working fixture.
+[`docs/dsl-reference.md`](./dsl-reference.md) for the full grammar. Five
+example fixtures ship in `public/examples/` — `beer-distribution` (the
+startup default), `drum-buffer-rope`, `cicd-pipeline`, `request-path`, and
+`agentic-verification-loop`. A working example:
+[`public/examples/beer-distribution.yaml`](../public/examples/beer-distribution.yaml).
 
 ### Minimal Example
 
@@ -378,7 +381,43 @@ visible underneath — the overlays color/annotate it, they don't replace it.
 
 ---
 
-## 8. Session Save / Load
+## 8. Theme
+
+A three-button toolbar (top right) — **Light**, **System**, **Dark** —
+controls the app's color scheme. All colors are CSS custom-property tokens
+on `:root`, keyed off `document.documentElement.dataset.theme`, so the
+switch is instant. JS-computed SVG colors (value circles, monitor
+sparklines) re-resolve against the new tokens via a `layers:theme` event,
+which triggers a canvas re-render.
+
+| Choice | Behavior |
+|---|---|
+| **Light** | Forces the light palette. |
+| **System** (default) | Follows the OS `prefers-color-scheme` live; re-resolves when the OS preference changes, with no reload. |
+| **Dark** | Forces the dark palette. |
+
+The preference is persisted in `localStorage` under `layers.theme`. The
+control is a `role="group"` toolbar; the active button exposes
+`aria-pressed="true"`. Both palettes are calibrated for WCAG-AA contrast.
+
+Programmatic API (`src/ui/theme-switcher.ts`):
+
+```typescript
+import { ThemeSwitcher, storedThemePreference, resolveTheme } from "@/ui";
+
+const ts = new ThemeSwitcher(hostEl);
+ts.mount();          // renders, applies, starts listening for OS changes
+ts.set("dark");      // set + persist + apply
+ts.current;          // "dark" (the preference, not the resolved value)
+
+// Without a DOM control — just read/resolve:
+storedThemePreference();   // "system"
+resolveTheme("system");    // "dark" if OS is in dark mode
+```
+
+---
+
+## 9. Session Save / Load
 
 The **Save session** and **Load session** buttons (bottom left) persist and
 restore the full application state.
@@ -419,24 +458,61 @@ When you load a session file:
 weights are deep-equal to the originals. ABM verdicts written onto nodes are
 preserved.
 
+### Uploading a New Scenario from YAML
+
+The **Upload scenario** button (bottom left, next to Save/Load session) opens a
+file picker accepting `.yaml`, `.yml`, or `.json` model files. This is the
+fastest way to load a brand-new model into the running app and immediately work
+with it across all three layers.
+
+When you upload a scenario file:
+
+1. The file text is parsed by the same DSL parser (`parseGraphOrThrow`) used at
+   startup. All violations are collected before the alert, so an invalid file
+   reports every problem at once.
+2. Loops are computed from the edges (never trusted from the file).
+3. The working `Graph` is replaced **in place** — the single source of truth
+   that Layer 1, Layer 2, Layer 3, and the ABM companion all reference — and
+   the canvas re-renders.
+4. View state resets to a clean baseline, because a freshly loaded model has no
+   associated session state:
+   - Layer 2 weights → defaults (all `1`).
+   - Layer 2 sensitivities → invalidated (re-derived on the next recompute).
+   - Layer 3 scenario tray → empty.
+   - Phase 5 migration trail → cleared, and migration arcs removed from the
+     canvas.
+5. The layer switcher stays on whichever overlay was active; switch to **L1**
+   to see the live node monitor, **L2** for the constraint ranking, or **L3**
+   for the T/I/OE simulation of the new model.
+
+If the file is invalid, an alert explains the first error; nothing changes.
+
+The upload accepts the same schema documented in [§2 Authoring a Graph](#2-authoring-a-graph).
+Example fixtures live in `public/examples/` and can be uploaded directly.
+
 ---
 
-## 9. Keyboard & Accessibility
+## 10. Keyboard & Accessibility
 
 - **Tab** — moves focus through all interactive controls (layer switcher
-  tabs, sliders, buttons, selects) in document order.
+  tabs, theme switcher buttons, sliders, buttons, selects) in document
+  order.
 - **`:focus-visible`** — every interactive element shows a 2px blue focus
   outline when reached via keyboard.
 - **ARIA roles** — the layer switcher is a `role="tablist"` with `role="tab"`
-  children; the canvas has `role="img"` with an `aria-label`; side panels have
-  `aria-label`; the IO bar is `role="toolbar"`.
+  children; the theme switcher is a `role="group"` toolbar with
+  `aria-pressed` on the active option; the canvas has `role="img"` with an
+  `aria-label`; side panels have `aria-label`; the IO bar is `role="toolbar"`.
 - **Color is never the sole encoding** — Layer 2 heat uses color + node size
   + the ranked side panel; Layer 3 sparklines use color + line position + delta
   badges; ABM verdicts use color + text status.
+- **Theme** — Light / System / Dark (see §8). Both palettes meet WCAG-AA
+  contrast; **System** follows `prefers-color-scheme` so users get their
+  preferred scheme automatically.
 
 ---
 
-## 10. Programmatic API
+## 11. Programmatic API
 
 All core logic is in framework-agnostic, unit-tested modules. You can use them
 without the UI.
@@ -511,6 +587,7 @@ const session = loadSession(json);
 
 - [`docs/dsl-reference.md`](./dsl-reference.md) — full YAML/JSON authoring grammar
 - [`docs/data-model.md`](./data-model.md) — the `Graph` types and invariants
+- [`docs/toc-and-ta.md`](./toc-and-ta.md) — Theory of Constraints & Throughput Accounting
 - [`docs/contributing.md`](./contributing.md) — branch model and Definition of Done
 - [`PLAN.md`](../PLAN.md) — development plan, testing, and deployment strategy
 - [`prompt.md`](../prompt.md) — the original architecture spec
