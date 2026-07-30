@@ -1,0 +1,58 @@
+{
+  "timeUnit": "1 week",
+  "tioe_suggestions_md": "## T/I/OE suggestions\n\n- order_backlog: classified as I (Inventory) — backlog is in-system WIP.\n- production_rate: classified as T (Throughput) — flow across the system boundary (delivery).\n- customer_demand: could not confidently classify (none) — exogenous driver; Loom declines to assert.\n\nReasoning: backlog accumulates inside the boundary; production is the rate of value exchange with the market. Demand is exogenous and carries no T/I/OE claim of its own.",
+  "nodes": {
+    "customer_demand": {
+      "mined": true,
+      "stage": "causal_discovery",
+      "confidence": 0.62,
+      "p_value": 0.11,
+      "tioe_class": "none",
+      "reasoning": "Exogenous driver; Loom could not confidently classify it as T, I, or OE."
+    },
+    "order_backlog": {
+      "mined": true,
+      "stage": "causal_discovery",
+      "confidence": 0.91,
+      "p_value": 0.003,
+      "tioe_class": "I",
+      "unit_value": 12.5,
+      "reasoning": "Backlog is in-system WIP — an Inventory/Investment stock."
+    },
+    "production_rate": {
+      "mined": true,
+      "stage": "causal_discovery",
+      "confidence": 0.88,
+      "p_value": 0.008,
+      "tioe_class": "T",
+      "unit_value": 12.5,
+      "reasoning": "Production is the rate of value exchange with the market — Throughput."
+    }
+  },
+  "edges": {
+    "d1": {
+      "mined": true,
+      "stage": "causal_discovery",
+      "confidence": 0.85,
+      "causal_support": true,
+      "structural_support": true,
+      "reasoning": "Demand drives backlog accumulation; supported by both causal and structural tests."
+    },
+    "d2": {
+      "mined": true,
+      "stage": "causal_discovery",
+      "confidence": 0.78,
+      "causal_support": true,
+      "structural_support": false,
+      "reasoning": "Backlog drives production scheduling; causal support present, structural support partial."
+    },
+    "d3": {
+      "mined": true,
+      "stage": "causal_discovery",
+      "confidence": 0.81,
+      "causal_support": true,
+      "structural_support": true,
+      "reasoning": "Production depletes backlog (negative polarity); strongly supported."
+    }
+  }
+}

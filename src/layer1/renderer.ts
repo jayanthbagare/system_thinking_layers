@@ -22,7 +22,7 @@ import { select, type Selection } from "d3-selection";
 import { forceSimulation, forceLink, forceManyBody, forceCenter, type Simulation } from "d3-force";
 import { drag } from "d3-drag";
 import { zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
-import type { Edge, Graph, Loop } from "@/model/types";
+import type { Edge, Graph, Loop, Provenance } from "@/model/types";
 import { deriveLoops, type DerivedLoops } from "@/graph/loops";
 import {
   arrowHead,
@@ -56,6 +56,16 @@ export interface SimNode {
   fx: number | null;
   fy: number | null;
   pinned: boolean;
+  /** Loom spec item 2 — true when this node carries mined provenance. */
+  mined: boolean;
+  /**
+   * Loom spec item 8 — mining confidence in [0,1], or null when no confidence
+   * is reported. Encoded on the node *border* opacity, an orthogonal channel
+   * to Layer 2's constraint-score color fill, so the two claims never collide.
+   */
+  confidence: number | null;
+  /** Loom spec item 7 — true when Loom could not classify this node (`none`). */
+  unclassified: boolean;
 }
 
 /** Phase 5 migration arc: a dashed path from the previous constraint to the new. */
@@ -75,9 +85,15 @@ export interface SimEdge {
   delayType: string;
   delayMagnitude: number;
   strength: number;
+  /** Loom spec item 2 — true when this edge carries mined provenance. */
+  mined: boolean;
+  /** Loom spec item 8 — mining confidence in [0,1], or null. Border opacity. */
+  confidence: number | null;
 }
 
 const NODE_RADIUS = 22;
+/** Outer halo ring radius for mined nodes (Loom spec item 2). */
+const MINED_HALO_RADIUS = NODE_RADIUS + 5;
 const ARROW_SIZE = 12; // chevron wing length (px) — loopy-style prominent head
 const POLARITY_BADGE_R = 11; // radius of the polarity badge at edge midpoint
 const NUDGE_ARROW_OFFSET = 12; // distance of the up/down nudge arrows from the node center
@@ -145,6 +161,13 @@ export interface RendererOptions {
    * play bar to surface "Degrees of freedom: N of M" — visible in every layer.
    */
   onStep?: (dof: number, total: number) => void;
+  /**
+   * Loom spec item 6 — a plain (non-shift) click on a node or edge. The host
+   * decides what to do (e.g. open the provenance detail panel when the element
+   * carries attached provenance). Shift-click still opens the edit modal; this
+   * fires for ordinary clicks only.
+   */
+  onElementClick?: (kind: "node" | "edge", id: string) => void;
 }
 
 export class Layer1Renderer {
@@ -810,6 +833,9 @@ export class Layer1Renderer {
         fx: n.pin ? n.pin.x : null,
         fy: n.pin ? n.pin.y : null,
         pinned: Boolean(n.pin),
+        mined: isMined(n.provenance),
+        confidence: n.provenance?.confidence ?? null,
+        unclassified: n.provenance?.tioeClass === "none",
       };
     });
   }
@@ -830,6 +856,8 @@ export class Layer1Renderer {
           delayType: e.delay.type,
           delayMagnitude: e.delay.magnitude,
           strength: e.strength,
+          mined: isMined(e.provenance),
+          confidence: e.provenance?.confidence ?? null,
         };
       })
       .filter((e): e is SimEdge => e !== null);
@@ -915,13 +943,15 @@ export class Layer1Renderer {
       .enter()
       .append("g")
       .attr("class", "edge")
-      .attr("data-edge-id", (d) => d.id);
+      .attr("data-edge-id", (d) => d.id)
+      .classed("is-mined", (d) => d.mined);
 
     enter.append("path").attr("class", "edge-line");
     enter.append("path").attr("class", "edge-arrow");
     enter.append("g").attr("class", "edge-hash");
 
     const merged = enter.merge(sel);
+    merged.classed("is-mined", (d) => d.mined);
 
     // Badge elements (polarity circle + text, delay number) in badgeLayer so
     // they render above the signal-dot layer and are never obscured.
@@ -958,7 +988,8 @@ export class Layer1Renderer {
     const g = select(el);
     g.select(".edge-line")
       .attr("d", geom.path)
-      .style("stroke-width", String(Math.max(1.5, 3 * Math.abs(d.strength) - 1)));
+      .style("stroke-width", String(Math.max(1.5, 3 * Math.abs(d.strength) - 1)))
+      .style("stroke-opacity", String(confidenceOpacity(d.confidence)));
 
     const [tip, leftWing, rightWing] = arrowHead(geom, target, ARROW_SIZE);
     g.select(".edge-arrow").attr(
@@ -1019,8 +1050,26 @@ export class Layer1Renderer {
       .enter()
       .append("g")
       .attr("class", "node")
-      .attr("data-node-id", (d) => d.id);
+      .attr("data-node-id", (d) => d.id)
+      .classed("is-mined", (d) => d.mined)
+      .classed("is-unclassified", (d) => d.unclassified);
 
+    // Mined halo ring sits behind the node circle (Loom spec item 2).
+    enter
+      .append("circle")
+      .attr("class", "node-mined-halo")
+      .attr("r", MINED_HALO_RADIUS);
+    // Unclassified marker — a small neutral hollow square at the top-right,
+    // a clearly neutral state distinct from any T/I/OE class or an error
+    // (Loom spec item 7).
+    enter
+      .append("rect")
+      .attr("class", "node-unclassified-mark")
+      .attr("x", NODE_RADIUS - 2)
+      .attr("y", -(NODE_RADIUS + 2))
+      .attr("width", 7)
+      .attr("height", 7)
+      .attr("rx", 1);
     enter.append("circle").attr("class", "node-circle").attr("r", NODE_RADIUS);
     enter.append("circle").attr("class", "node-value-circle").attr("r", NODE_RADIUS * 0.5);
     enter.append("text").attr("class", "node-label");
@@ -1064,6 +1113,8 @@ export class Layer1Renderer {
       .attr("y", NODE_RADIUS + 14)
       .attr("text-anchor", "middle")
       .text((d) => d.label);
+    merged.classed("is-mined", (d) => d.mined);
+    merged.classed("is-unclassified", (d) => d.unclassified);
     merged.classed("is-pinned", (d) => d.pinned);
     this.styleNodesForHeat();
     this.styleNodeValues();
@@ -1089,6 +1140,9 @@ export class Layer1Renderer {
       circle
         .classed("is-pinned-upper", pin === "upper")
         .classed("is-pinned-lower", pin === "lower");
+      // Loom spec item 8 — mining confidence on the node *border* opacity,
+      // an orthogonal channel to the Layer 2 score (color fill + radius).
+      circle.style("stroke-opacity", String(confidenceOpacity(d.confidence)));
     });
   }
 
@@ -1158,16 +1212,23 @@ export class Layer1Renderer {
       // stays a no-op here (nudges go through the up/down arrows below); the
       // edit modal is the channel for writing node properties back to the YAML.
       .on("click", (event, d) => {
-        if (!event.shiftKey) return;
-        if (!this.graph) return;
-        const node = this.graph.nodes.find((n) => n.id === d.id);
-        if (!node) return;
+        if (event.shiftKey) {
+          // Shift-click opens the edit modal (spec §2: edit mode).
+          if (!this.graph) return;
+          const node = this.graph.nodes.find((n) => n.id === d.id);
+          if (!node) return;
+          event.stopPropagation();
+          openEditModal(
+            node,
+            this.graph,
+            (patch) => this.opts.onEditNode?.(d.id, patch),
+          );
+          return;
+        }
+        // Plain click — surface provenance detail (Loom spec item 6). The host
+        // decides whether the element has provenance worth showing.
         event.stopPropagation();
-        openEditModal(
-          node,
-          this.graph,
-          (patch) => this.opts.onEditNode?.(d.id, patch),
-        );
+        this.opts.onElementClick?.("node", d.id);
       });
 
     // The up/down arrows revealed on hover nudge the node's value up/down.
@@ -1212,6 +1273,14 @@ export class Layer1Renderer {
       .selectAll<SVGGElement, Loop>("g.loop-label")
       .on("mouseenter", (_, d) => this.highlightLoop(d.id))
       .on("mouseleave", () => this.highlightLoop(null));
+
+    // Plain click on an edge — surface provenance detail (Loom spec item 6).
+    this.linkLayer
+      .selectAll<SVGGElement, SimEdge>("g.edge")
+      .on("click", (event, d) => {
+        event.stopPropagation();
+        this.opts.onElementClick?.("edge", d.id);
+      });
   }
 
   /** A node's authored `initial_value`, or 0 if not found. */
@@ -1254,5 +1323,28 @@ export class Layer1Renderer {
 /** Clamp `v` to the closed range [lo, hi]. */
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
+}
+
+/**
+ * Whether an element renders as "mined" (Loom spec item 2). An element carrying
+ * attached provenance is mined unless it is explicitly human-confirmed
+ * (`provenance.mined === false`); elements without provenance stay solid
+ * (hand-authored).
+ */
+function isMined(prov: Provenance | undefined): boolean {
+  return prov !== undefined && prov.mined !== false;
+}
+
+/**
+ * Loom spec item 8 — map mining confidence in [0,1] to a border stroke
+ * opacity in [0.3,1]. null/undefined (no confidence reported, or hand-authored
+ * element) → full opacity. This is the orthogonal-to-color channel that keeps
+ * Layer 2's constraint score (color fill) and Loom's mining confidence
+ * visually distinguishable.
+ */
+function confidenceOpacity(confidence: number | null | undefined): number {
+  if (confidence === null || confidence === undefined || Number.isNaN(confidence)) return 1;
+  const c = Math.max(0, Math.min(1, confidence));
+  return 0.3 + 0.7 * c;
 }
 

@@ -1,0 +1,54 @@
+# Order Backlog — shared synthetic Loom × Layers example.
+#
+# A minimal supply-chain fragment: customer demand grows an order backlog;
+# production works it down. One balancing loop (backlog -> production ->
+# backlog) with a material delay. This is the fixture both repos use for the
+# cross-repo integration test (Loom spec item 11): a real Loom-produced model
+# + its sidecar bundle.
+#
+# The companion `provenance.json` carries Loom's mined structure for this
+# model. Without that sidecar the model loads and behaves exactly like any
+# hand-authored one — backward compatible.
+
+nodes:
+  - id: customer_demand
+    label: Customer Demand
+    type: flow
+    boundary: true
+    initial_value: 100
+    unit: units/week
+
+  - id: order_backlog
+    label: Order Backlog
+    type: stock
+    initial_value: 50
+    unit: units
+    collar: { lower: 0 }
+
+  - id: production_rate
+    label: Production Rate
+    type: flow
+    initial_value: 100
+    unit: units/week
+
+edges:
+  - id: d1
+    source: customer_demand
+    target: order_backlog
+    polarity: +
+    delay: { type: material, magnitude: 1 }
+    strength: 1
+
+  - id: d2
+    source: order_backlog
+    target: production_rate
+    polarity: +
+    delay: { type: information, magnitude: 1 }
+    strength: 1.2
+
+  - id: d3
+    source: production_rate
+    target: order_backlog
+    polarity: "-"
+    delay: { type: material, magnitude: 2 }
+    strength: 1

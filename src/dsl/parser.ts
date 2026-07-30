@@ -1,5 +1,5 @@
 import yaml from "js-yaml";
-import type { Graph, Node, Edge, NodeType, Polarity, DelayType, CollarApproach, EdgeRange } from "@/model/types";
+import type { Graph, Node, Edge, NodeType, Polarity, DelayType, CollarApproach, EdgeRange, Provenance } from "@/model/types";
 import { validate, type ValidationIssue } from "@/model/validate";
 
 /**
@@ -93,6 +93,10 @@ export function serializeGraphYaml(graph: Graph): string {
     if (n.agent_binding) {
       lines.push(`    agent_binding: { rule_id: ${yamlScalar(n.agent_binding.rule_id)} }`);
     }
+    // `meta` is a forward-compatible core-schema extension (Loom spec item
+    // 10); preserve it on round-trip. `provenance` is sidecar-only and is
+    // deliberately NOT emitted here (it does not belong in the authored YAML).
+    if (n.meta !== undefined) lines.push(`    meta: ${JSON.stringify(n.meta)}`);
   }
   lines.push("edges:");
   for (const e of graph.edges) {
@@ -108,6 +112,7 @@ export function serializeGraphYaml(graph: Graph): string {
       if (e.range.delay_magnitude) parts.push(`delay_magnitude: [${num(e.range.delay_magnitude[0])}, ${num(e.range.delay_magnitude[1])}]`);
       if (parts.length > 0) lines.push(`    range: { ${parts.join(", ")} }`);
     }
+    if (e.meta !== undefined) lines.push(`    meta: ${JSON.stringify(e.meta)}`);
   }
   lines.push("");
   return lines.join("\n");
@@ -161,6 +166,8 @@ interface RawNode {
   agent_binding?: { rule_id?: string };
   pin?: { x?: number; y?: number };
   tioe_class?: string;
+  meta?: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
 }
 
 interface RawEdge {
@@ -173,6 +180,8 @@ interface RawEdge {
   delay_magnitude?: number;
   strength?: number;
   range?: { strength?: [number, number]; delay_magnitude?: [number, number] };
+  meta?: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
 }
 
 interface RawGraph {
@@ -216,6 +225,8 @@ function normalizeNode(r: RawNode): Node {
     ...(collar ? { collar } : {}),
     ...(typeof r.capacity_cost === "number" ? { capacity_cost: r.capacity_cost } : {}),
     ...(agent_binding ? { agent_binding } : {}),
+    ...(isPlainObject(r.meta) ? { meta: r.meta } : {}),
+    ...(isPlainObject(r.provenance) ? { provenance: r.provenance as Provenance } : {}),
   };
   // Pass legacy flat fields through so the validator can flag them. These are
   // NOT reinterpreted — the author must restate them in the collar: block.
@@ -244,9 +255,17 @@ function normalizeEdge(r: RawEdge): Edge {
     delay: { type: delayType, magnitude: delayMag },
     strength: r.strength ?? 1,
     ...(range ? { range } : {}),
+    ...(isPlainObject(r.meta) ? { meta: r.meta } : {}),
+    ...(isPlainObject(r.provenance) ? { provenance: r.provenance as Provenance } : {}),
   };
 }
 
 function formatIssues(issues: ValidationIssue[]): string {
   return issues.map((i) => `  - [${i.code}] ${i.message}`).join("\n");
+}
+
+/** True for a plain object (not an array or null). Used to pass `meta`/
+ * `provenance` extension blocks through normalization untouched. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }

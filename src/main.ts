@@ -17,9 +17,10 @@ import { Layer3Panel } from "@/layer3";
 import type { TypedIntervention } from "@/layer3";
 import { AbmPanel } from "@/abm";
 import { LayerSwitcher, ThemeSwitcher, type LayerControl } from "@/ui";
-import { downloadSession, downloadGraphYaml, uploadSession, uploadGraphYaml } from "@/io";
+import { downloadSession, downloadGraphYaml, downloadProvenance, uploadSession, loadGraphWithProvenance } from "@/io";
 import { serializeGraphYaml } from "@/dsl/parser";
 import { DEFAULT_ENGINE_OPTIONS } from "@/sim";
+import { hasProvenance, ProvenanceDetailPanel } from "@/provenance";
 import {
   pinScenario,
   nextScenarioId,
@@ -31,7 +32,7 @@ import {
   type ScenarioTray,
 } from "@/scenario";
 import type { DEFAULT_WEIGHTS } from "@/layer2/scoring";
-import type { Node } from "@/model/types";
+import type { Graph, Node } from "@/model/types";
 import type { NodeEditPatch } from "@/layer1";
 // Vite ?raw import bundles the fixture as a string — no node:fs at runtime,
 // keeping the app client-side only (per spec: no backend).
@@ -106,6 +107,37 @@ function main(): void {
   monitorHost.className = "node-monitor-host";
   root.append(monitorHost);
 
+  // Loom spec item 6 — provenance detail panel (read-only evidence trail; the
+  // P3 override channel is wired in Phase 3). Declared before the renderer so
+  // the renderer's onElementClick callback can close over it.
+  const provenanceDetail = new ProvenanceDetailPanel(graph, {
+    onOverride: (nodeId: string, tioeClass: "T" | "I" | "OE" | "none") => {
+      // Loom spec item 9 — read-modify-write. Write the correction onto the
+      // node's provenance in the single source of truth, re-derive the
+      // unclassified count, refresh the affected views, and download the
+      // corrected `provenance.json` (the Loom intermediate file).
+      const idx = graph.nodes.findIndex((n: Node) => n.id === nodeId);
+      if (idx < 0) return;
+      const node = graph.nodes[idx];
+      const prov = node.provenance ? { ...node.provenance, tioeClass } : { tioeClass };
+      graph.nodes[idx] = { ...node, provenance: prov };
+      // Re-derive the model-level unclassified count (omit the key when 0,
+      // per exactOptionalPropertyTypes: never assign undefined to an optional).
+      if (graph.provenance) {
+        const count = graph.nodes.filter((n) => n.provenance?.tioeClass === "none").length;
+        const { unclassifiedCount: _drop, ...rest } = graph.provenance;
+        void _drop;
+        graph.provenance = count > 0 ? { ...rest, unclassifiedCount: count } : rest;
+      }
+      renderer.render(graph);
+      l2.invalidate();
+      l2.setWeights(weights);
+      l3.refreshProvenance();
+      abm.refresh();
+      downloadProvenance(graph);
+    },
+  });
+
   const renderer = new Layer1Renderer(svg, {
     width: window.innerWidth,
     height: window.innerHeight,
@@ -143,6 +175,11 @@ function main(): void {
     },
     onStep: (dof: number, total: number) => {
       dofLabel.textContent = `DoF: ${dof} of ${total}`;
+    },
+    onElementClick: (kind: "node" | "edge", id: string) => {
+      // Loom spec item 6 — open the provenance detail panel when the clicked
+      // element carries attached provenance. No-op for hand-authored elements.
+      provenanceDetail.open(kind, id);
     },
   });
   renderer.render(graph);
@@ -412,44 +449,113 @@ function main(): void {
   // Upload a YAML model file as a new scenario across L1/L2/L3 (and ABM).
   // Resets weights, scenario tray, and migration trail because a freshly
   // loaded model has no associated session state (mirrors `loadGraphYaml`).
+  // Accepts a `provenance.json` Loom sidecar alongside the YAML (Loom spec
+  // item 1): selecting both attaches provenance to the loaded model. With no
+  // sidecar the path is identical to today — backward compatible.
+  const provenanceStatus = document.createElement("span");
+  provenanceStatus.className = "provenance-status";
+  provenanceStatus.dataset.role = "provenance-status";
   const uploadBtn = document.createElement("button");
   uploadBtn.type = "button";
   uploadBtn.textContent = "Upload scenario";
   const yamlInput = document.createElement("input");
   yamlInput.type = "file";
   yamlInput.accept = "text/yaml,.yaml,.yml,application/json,.json";
+  yamlInput.multiple = true;
   yamlInput.style.display = "none";
   uploadBtn.addEventListener("click", () => yamlInput.click());
+
+  // Centralised swap-and-refresh: replaces the in-memory Graph contents in
+  // place (renderer/panels hold the ref) and re-scores everything. Used by
+  // scenario upload, session load, and attach-provenance.
+  function applyLoadedGraph(next: Graph, provIssues: string[] = []): void {
+    graph.nodes = next.nodes;
+    graph.edges = next.edges;
+    graph.loops = next.loops;
+    // Graph-level provenance rides on the Graph object itself; carry it over
+    // so Layer 3 / ABM / the detail panel can read it.
+    if (next.provenance !== undefined) {
+      (graph as { provenance?: unknown }).provenance = next.provenance;
+    } else {
+      delete (graph as { provenance?: unknown }).provenance;
+    }
+    weights = {
+      in_degree: 1,
+      delay_ratio: 1,
+      rate_mismatch: 1,
+      dominant_loop: 1,
+      sensitivity: 1,
+    };
+    scenarioTray = emptyTray();
+    migrationTrail = [];
+    renderer.drawMigrationArcs([]);
+    renderer.render(graph);
+    l2.invalidate();
+    l2.setWeights(weights);
+    l2.setMigrationTrail(migrationTrail);
+    l3.setWeights(weights);
+    l3.setTray(scenarioTray);
+    abm.refresh();
+    // Surface provenance presence + any non-fatal sidecar issues.
+    const hasProv = hasProvenance(graph);
+    provenanceStatus.textContent = hasProv
+      ? `Provenance attached${provIssues.length > 0 ? ` (${provIssues.length} warning${provIssues.length > 1 ? "s" : ""})` : ""}`
+      : provIssues.length > 0
+        ? provIssues[0]
+        : "";
+    provenanceStatus.classList.toggle("is-active", hasProv);
+  }
+
   yamlInput.addEventListener("change", () => {
-    const file = yamlInput.files?.[0];
-    if (!file) return;
-    uploadGraphYaml(file)
-      .then((next) => {
-        graph.nodes = next.nodes;
-        graph.edges = next.edges;
-        graph.loops = next.loops;
-        weights = {
-          in_degree: 1,
-          delay_ratio: 1,
-          rate_mismatch: 1,
-          dominant_loop: 1,
-          sensitivity: 1,
-        };
-        scenarioTray = emptyTray();
-        migrationTrail = [];
-        renderer.drawMigrationArcs([]);
-        renderer.render(graph);
-        l2.invalidate();
-        l2.setWeights(weights);
-        l2.setMigrationTrail(migrationTrail);
-        l3.setWeights(weights);
-        l3.setTray(scenarioTray);
+    const files = Array.from(yamlInput.files ?? []);
+    if (files.length === 0) return;
+    // The YAML/JSON model is the file whose name ends in .yaml/.yml (or the
+    // first file if none match). A `provenance.json` sidecar is any .json
+    // file named provenance.json (or the sole .json when a yaml is present).
+    const isYaml = (f: File) => /\.(yaml|yml)$/i.test(f.name);
+    const isProv = (f: File) => /provenance.*\.json$/i.test(f.name) || (/\.json$/i.test(f.name) && !isYaml(f));
+    const yamlFile = files.find(isYaml) ?? files.find((f) => !isProv(f)) ?? files[0];
+    const provFile = files.find(isProv);
+    Promise.all([yamlFile.text(), provFile ? provFile.text() : Promise.resolve(undefined)])
+      .then(([yamlText, sidecar]) => {
+        const { graph: next, provenanceIssues } = loadGraphWithProvenance(yamlText, sidecar);
+        applyLoadedGraph(next, provenanceIssues.map((i) => i.message));
       })
       .catch((err: unknown) => {
         window.alert(`Failed to load scenario: ${err instanceof Error ? err.message : String(err)}`);
       });
   });
-  ioHost.append(saveBtn, loadBtn, fileInput, uploadBtn, yamlInput);
+
+  // Attach (or replace) a Loom `provenance.json` sidecar onto the model that is
+  // already loaded, without reloading the YAML. Lets a user keep their working
+  // graph and enrich it with mined structure after the fact.
+  const attachBtn = document.createElement("button");
+  attachBtn.type = "button";
+  attachBtn.textContent = "Attach provenance";
+  attachBtn.title = "Load a provenance.json Loom sidecar onto the current model.";
+  const provInput = document.createElement("input");
+  provInput.type = "file";
+  provInput.accept = "application/json,.json";
+  provInput.style.display = "none";
+  attachBtn.addEventListener("click", () => provInput.click());
+  provInput.addEventListener("change", () => {
+    const file = provInput.files?.[0];
+    if (!file) return;
+    file
+      .text()
+      .then((sidecar) => {
+        const { graph: next, provenanceIssues } = loadGraphWithProvenance(
+          serializeGraphYaml(graph),
+          sidecar,
+        );
+        applyLoadedGraph(next, provenanceIssues.map((i) => i.message));
+      })
+      .catch((err: unknown) => {
+        window.alert(`Failed to attach provenance: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  });
+
+  ioHost.append(saveBtn, loadBtn, fileInput, uploadBtn, yamlInput, attachBtn, provInput, provenanceStatus);
   root.append(ioHost);
 
   // --- Resize ------------------------------------------------------------

@@ -34,6 +34,48 @@ export interface AgentRuleRef {
 }
 
 /**
+ * Provenance attached by a Loom sidecar (`provenance.json`). This is external
+ * evidence about how a node or edge was produced — it is NOT computed graph
+ * state and the validator never constrains it. Every field is optional because
+ * real Loom output drifts; the loader is tolerant of missing keys (see the
+ * discrepancy note: the reference document assumed `unit_value`,
+ * `causal_support`, `tioe_class`, etc. — the loader accepts both snake_case
+ * and camelCase and maps them here).
+ *
+ * Backward compatibility: when no sidecar is present, this field is omitted
+ * entirely and the application behaves exactly as it does for a hand-authored
+ * model (per the Loom integration spec: "nothing here changes the experience
+ * for a person who never touches Loom at all").
+ */
+export interface Provenance {
+  /** True for mined/inferred structure; false (or omitted) for human-confirmed. */
+  mined?: boolean;
+  /** The Loom stage that produced this element (e.g. "causal_discovery"). */
+  stage?: string;
+  /** Mining confidence in this element, 0..1. */
+  confidence?: number;
+  /** Statistical p-value of the supporting test, when reported. */
+  pValue?: number;
+  /** Plain-English reasoning carried from Loom's `tioe_suggestions.md`. */
+  reasoning?: string;
+  /**
+   * Loom's suggested T/I/OE class for a node. Note: this repo DERIVES T/I/OE
+   * from the system boundary + topology (the hand-authored `tioe_class` tag
+   * is deprecated and rejected by the validator). This field is Loom's
+   * *suggestion* — a provenance artefact surfaced in the UI, never a model
+   * tag. `"none"` is Loom's honest "could not classify" default and renders
+   * as a distinctly neutral state (Loom spec item 7).
+   */
+  tioeClass?: "T" | "I" | "OE" | "none";
+  /** Dollars-per-physical-unit conversion factor (Loom spec item 4). */
+  unitValue?: number;
+  /** Whether causal evidence supports this edge. */
+  causalSupport?: boolean;
+  /** Whether structural evidence supports this edge. */
+  structuralSupport?: boolean;
+}
+
+/**
  * Authored uncertainty on an edge's static properties (Phase 8 sampler). NOT
  * enforced by the engine — it declares "I don't know this number precisely,"
  * distinct from a collar which declares "the system cannot go there."
@@ -92,6 +134,19 @@ export interface Node {
    * Omit until an ABM run has reported on this node.
    */
   abm_verdict?: AbmVerdict;
+  /**
+   * Loom sidecar provenance. Attached by the sidecar-aware import when a
+   * `provenance.json` is loaded alongside this model; omitted otherwise.
+   * Validator-ignorable, never constrained. See `Provenance`.
+   */
+  provenance?: Provenance;
+  /**
+   * Forward-compatible extension point (Loom spec item 10): an arbitrary,
+   * validator-ignorable object so future provenance can live in the core YAML
+   * rather than always requiring a sidecar. Decide-the-shape-now; nothing
+   * consumes it yet. Omitted when absent.
+   */
+  meta?: Record<string, unknown>;
 }
 
 export type DelayType = "none" | "material" | "information" | "perception";
@@ -114,6 +169,10 @@ export interface Edge {
   strength: number;
   /** Authored uncertainty on static properties (Phase 8). Not engine-enforced. */
   range?: EdgeRange;
+  /** Loom sidecar provenance for this edge. See `Node.provenance`. */
+  provenance?: Provenance;
+  /** Forward-compatible extension point (Loom spec item 10). See `Node.meta`. */
+  meta?: Record<string, unknown>;
 }
 
 export type LoopSign = "reinforcing" | "balancing";
@@ -145,4 +204,28 @@ export interface Graph {
   edges: Edge[];
   /** Derived via cycle enumeration, never hand-authored. */
   loops: Loop[];
+  /**
+   * Model-level Loom provenance (the part of `provenance.json` that is not
+   * per-element: the model's real time unit, the `tioe_suggestions.md` text,
+   * and the count of unclassified nodes). Attached by the sidecar-aware import;
+   * omitted when no sidecar is present. Survives loop re-derivation (it rides
+   * on `Graph`, not on the computed `loops`).
+   */
+  provenance?: GraphProvenance;
+}
+
+/**
+ * Model-level Loom provenance. The per-element fields live on `Node`/`Edge`;
+ * this carries the model-wide artefacts the Loom spec surfaces near Layer 3
+ * and the ABM view.
+ */
+export interface GraphProvenance {
+  /** Real time unit the model's time axis is expressed in (e.g. "1 week"). */
+  timeUnit?: string;
+  /** The `tioe_suggestions.md` body, for the "suggestions available" nudge. */
+  tioeSuggestionsMd?: string;
+  /** Count of nodes Loom could not confidently classify (`tioeClass: none`). */
+  unclassifiedCount?: number;
+  /** Whether a `tioe_suggestions.md` sidecar was present. */
+  hasSuggestions?: boolean;
 }

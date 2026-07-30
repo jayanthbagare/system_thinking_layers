@@ -17,6 +17,7 @@ import { validate } from "@/model/validate";
 import type { Weights } from "@/layer2/scoring";
 import { withComputedLoops } from "@/graph/loops";
 import { serializeGraphYaml } from "@/dsl/parser";
+import { serializeProvenance } from "@/provenance";
 import type { ScenarioTray, ScenarioCard } from "@/scenario";
 import { emptyTray } from "@/scenario";
 
@@ -130,4 +131,20 @@ export function downloadGraphYaml(graph: Graph, filename = "graph.yaml"): void {
 /** Read a file selected by the user and parse it as a session. */
 export function uploadSession(file: File): Promise<Session> {
   return file.text().then((text) => loadSession(text));
+}
+
+/**
+ * Trigger a browser download of the graph's provenance as a `provenance.json`
+ * (Loom spec item 9 — read-modify-write back to the Loom intermediate file).
+ * The corrected file round-trips through the tolerant loader.
+ */
+export function downloadProvenance(graph: Graph, filename = "provenance.json"): void {
+  const json = serializeProvenance(graph);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }

@@ -8,11 +8,13 @@ export type {
   EdgeRange,
   EdgeDelay,
   Graph,
+  GraphProvenance,
   Loop,
   LoopSign,
   Node,
   NodeType,
   Polarity,
+  Provenance,
 } from "./types";
 
 export { isValid, validate } from "./validate";

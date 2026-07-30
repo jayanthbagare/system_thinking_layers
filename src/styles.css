@@ -63,6 +63,10 @@
   --c-pre: #9e9e9e;
   --c-pinned-upper: #c62828;
   --c-pinned-lower: #1976d2;
+  /* Loom mined structure — a muted accent + a dashed stroke so mined vs
+   * hand-authored elements read at a glance (Loom spec item 2). */
+  --c-mined: #8d6e63;
+  --c-mined-bg: rgba(141, 110, 99, 0.08);
   --c-dof-bg: #eeeeee;
   --c-edit-input-border: #bbbbbb;
   --c-edit-btn-bg: #f5f5f5;
@@ -127,6 +131,8 @@
   --c-pre: #868d96;
   --c-pinned-upper: #f0626e;
   --c-pinned-lower: #6aa9e8;
+  --c-mined: #b0896f;
+  --c-mined-bg: rgba(176, 137, 111, 0.16);
   --c-dof-bg: #2a2f37;
   --c-edit-input-border: #525a64;
   --c-edit-btn-bg: #2a2f37;
@@ -166,6 +172,44 @@ body {
   stroke: var(--c-edge);
   stroke-width: 2;
   fill: none;
+}
+/* Mined (Loom sidecar) structure — dashed, lighter stroke so mined vs
+ * hand-authored elements read at a glance (Loom spec item 2). Human-confirmed
+ * elements (provenance.mined === false) keep the solid full-weight style. */
+.edge.is-mined .edge-line,
+.edge.is-mined .edge-arrow {
+  stroke: var(--c-mined);
+  stroke-dasharray: 5 4;
+}
+.edge.is-mined .edge-polarity-bg {
+  stroke: var(--c-mined);
+  stroke-opacity: 0.85;
+}
+/* A dashed outer halo ring on mined nodes — orthogonal to the heat fill
+ * (color) and the collar pin ring (also dashed), so the three never collide. */
+.node-mined-halo {
+  fill: none;
+  stroke: var(--c-mined);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+  pointer-events: none;
+}
+.node:not(.is-mined) .node-mined-halo {
+  display: none;
+}
+/* Loom spec item 7 — a clearly neutral marker for nodes Loom could not
+ * classify (`tioe_class: none`): a hollow neutral square, neither an error
+ * color nor any of the three real T/I/OE classes. */
+.node-unclassified-mark {
+  fill: none;
+  stroke: var(--c-text-faint);
+  stroke-width: 1.5;
+  pointer-events: none;
+  opacity: 0.9;
+}
+.node:not(.is-unclassified) .node-unclassified-mark {
+  display: none;
 }
 .edge-arrow {
   stroke: var(--c-edge);
@@ -857,6 +901,184 @@ body {
   margin: 10px 0 6px;
   color: var(--c-text-dim);
   font-size: 11px;
+}
+/* Loom provenance controls (Layer 3): real-time-unit caption + dollar toggle. */
+.layer3-provenance {
+  display: contents;
+}
+.layer3-timeunit {
+  font-weight: 600;
+  color: var(--c-mined);
+}
+.layer3-unitscale {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 6px;
+}
+.layer3-unitscale-group {
+  display: flex;
+  gap: 4px;
+}
+.layer3-unitscale-group button {
+  border: 1px solid var(--c-border-strong);
+  background: var(--c-surface-solid);
+  color: var(--c-text-muted);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.layer3-unitscale-group button.is-selected {
+  background: var(--c-delay);
+  border-color: var(--c-delay);
+  color: var(--c-text-on-accent);
+}
+.layer3-unitscale-note {
+  color: var(--c-warn-text);
+}
+.layer2-provenance-legend {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--c-mined);
+  border-radius: 4px;
+  background: var(--c-mined-bg);
+}
+.layer2-provenance-legend-text {
+  margin: 2px 0 0;
+  color: var(--c-text-dim);
+  font-size: 11px;
+}
+.layer3-provenance-banner {
+  margin: 2px 0 6px;
+}
+.layer3-unclassified-badge {
+  border: 1px solid var(--c-border-strong);
+  background: var(--c-surface-2);
+  color: var(--c-text-muted);
+  border-radius: 10px;
+  padding: 2px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.layer3-unclassified-badge.is-open {
+  border-color: var(--c-mined);
+}
+.layer3-unclassified-detail pre {
+  margin: 6px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px 8px;
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border-soft);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--c-text-muted);
+  white-space: pre-wrap;
+}
+.provenance-status {
+  font-size: 11px;
+  color: var(--c-text-dim);
+  margin-left: 4px;
+}
+/* Provenance detail modal (Loom spec item 6). */
+.provenance-modal {
+  border: 1px solid var(--c-border-strong);
+  border-radius: 8px;
+  background: var(--c-surface-solid);
+  color: var(--c-text);
+  max-width: 460px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 28px var(--c-shadow);
+}
+.provenance-modal::backdrop {
+  background: var(--c-backdrop);
+}
+.provenance-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.provenance-modal-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.provenance-modal-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+.provenance-modal-key {
+  color: var(--c-text-dim);
+}
+.provenance-modal-val {
+  color: var(--c-text);
+  text-align: right;
+}
+.provenance-modal-section {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-text-muted);
+}
+.provenance-modal-reasoning {
+  margin: 0;
+  font-size: 12px;
+  color: var(--c-text-muted);
+  white-space: pre-wrap;
+}
+.provenance-modal-override {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  border-top: 1px dashed var(--c-border);
+  padding-top: 8px;
+}
+.provenance-modal-override select {
+  font-size: 12px;
+}
+.provenance-modal-close {
+  align-self: flex-end;
+  margin-top: 4px;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+/* ABM validation priority (Loom spec item 5). */
+.abm-priority-title {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-mined);
+}
+.abm-priority-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.abm-priority-item {
+  color: var(--c-text-muted);
+}
+.abm-priority-item.is-clickable {
+  cursor: pointer;
+}
+.abm-priority-item.is-clickable:hover .abm-priority-head {
+  color: var(--c-delay);
+}
+.abm-priority-head {
+  color: var(--c-text);
+}
+.abm-priority-reason {
+  color: var(--c-text-faint);
+}
+.provenance-status.is-active {
+  color: var(--c-mined);
+  font-weight: 600;
 }
 .layer3-spark-card {
   border: 1px solid var(--c-border-soft);

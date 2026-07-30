@@ -21,6 +21,7 @@ import {
   ruleExpectedBehavior,
   validateAbm,
 } from "./validate";
+import { rankAbmPriority } from "@/provenance";
 
 const STEPS = 300;
 const RULE_LABELS: Record<RuleKind, string> = {
@@ -72,6 +73,21 @@ export class AbmPanel {
     this.clearVerdict();
   }
 
+  /**
+   * Re-render the whole pane (used after the working graph is replaced, e.g. a
+   * Loom sidecar is attached — the validation-priority list is derived from
+   * the new provenance). Run state is cleared: a new model invalidates a prior
+   * ABM run.
+   */
+  refresh(): void {
+    this.baseline = null;
+    // A replaced graph may not contain the previously bound node.
+    if (!this.graph.nodes.some((n) => n.id === this.nodeId)) {
+      this.nodeId = this.graph.nodes[0]?.id ?? "";
+    }
+    this.render();
+  }
+
   destroy(): void {
     this.client.destroy();
   }
@@ -81,8 +97,51 @@ export class AbmPanel {
   private render(): void {
     this.host.innerHTML = "";
     this.host.append(this.renderHeader());
+    this.host.append(this.renderPriority());
     this.host.append(this.renderControls());
     this.host.append(this.renderRunSection());
+  }
+
+  /**
+   * Loom spec item 5 — a ranked "worth checking first" list derived from the
+   * attached provenance (low confidence or a support mismatch first). Rendered
+   * only when a sidecar is present; absent for hand-authored models. Clicking a
+   * node entry binds it as the ABM's bound node so the user can run validation
+   * on the suggested candidate.
+   */
+  private renderPriority(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "abm-priority";
+    section.dataset.role = "abm-priority";
+    const entries = rankAbmPriority(this.graph);
+    if (entries.length === 0) return section;
+    const title = document.createElement("p");
+    title.className = "abm-priority-title";
+    title.textContent = "Validation priority (Loom)";
+    section.append(title);
+    const list = document.createElement("ol");
+    list.className = "abm-priority-list";
+    for (const e of entries.slice(0, 8)) {
+      const li = document.createElement("li");
+      li.className = "abm-priority-item";
+      const head = document.createElement("span");
+      head.className = "abm-priority-head";
+      head.textContent = `${e.kind === "node" ? "\u25cf" : "\u2192"} ${e.label}`;
+      const reason = document.createElement("span");
+      reason.className = "abm-priority-reason";
+      reason.textContent = e.reason;
+      li.append(head, reason);
+      if (e.kind === "node") {
+        li.classList.add("is-clickable");
+        li.title = "Bind this node and run validation";
+        li.addEventListener("click", () => {
+          this.bindNode(e.id);
+        });
+      }
+      list.append(li);
+    }
+    section.append(list);
+    return section;
   }
 
   private renderHeader(): HTMLElement {

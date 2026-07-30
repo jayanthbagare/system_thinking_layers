@@ -26,6 +26,7 @@ import {
 import { heatColor } from "@/layer1/layout";
 import { normalizedSensitivities, runMonteCarlo, verdictMessage, type RobustnessReport } from "@/sim";
 import { DEFAULT_ENGINE_OPTIONS, type EngineOptions } from "@/sim";
+import { hasProvenance } from "@/provenance";
 import type { Layer1Renderer } from "@/layer1/renderer";
 
 const DEBOUNCE_MS = 80; // comfortably under the 100ms acceptance budget
@@ -146,9 +147,32 @@ export class Layer2Panel {
     this.host.append(this.renderHeader());
     this.host.append(this.renderSliders());
     this.host.append(this.renderRanking());
+    this.host.append(this.renderProvenanceLegend());
     this.host.append(this.renderPredictedVsObserved());
     this.host.append(this.renderMigration());
     this.host.append(this.renderRobustness());
+  }
+
+  /**
+   * Loom spec item 8 — when provenance is attached, state which visual channel
+   * carries which score so the two never visually collide. Constraint score →
+   * fill color + node radius; Loom mining confidence → border opacity. Rendered
+   * only with a sidecar; absent for hand-authored models (no clutter).
+   */
+  private renderProvenanceLegend(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "layer2-provenance-legend";
+    section.dataset.role = "provenance-legend";
+    if (!hasProvenance(this.graph)) return section;
+    const title = document.createElement("p");
+    title.className = "layer2-caption";
+    title.textContent = "Two scores, two channels";
+    const row = document.createElement("p");
+    row.className = "layer2-provenance-legend-text";
+    row.textContent =
+      "Constraint score \u2192 fill color & node size.  Mining confidence \u2192 border opacity.";
+    section.append(title, row);
+    return section;
   }
 
   private renderHeader(): HTMLElement {

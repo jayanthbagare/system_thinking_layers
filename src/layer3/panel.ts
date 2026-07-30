@@ -44,6 +44,7 @@ import { DEFAULT_WEIGHTS, topConstraints, type Weights } from "@/layer2/scoring"
 import type { ScenarioTray } from "@/scenario";
 import { emptyTray } from "@/scenario";
 import { cssVar } from "@/ui";
+import { unitValueSummary, scaleTioeSnapshot } from "@/provenance";
 
 /** Pre-intervention baseline color (resolves through the theme cascade). */
 function preColor(): string {
@@ -128,6 +129,14 @@ export class Layer3Panel {
   private mode: PanelMode = "typed";
   private rawDelta = 50;
 
+  /**
+   * Loom spec item 4 — when a shared `unit_value` is present, the displayed
+   * T/I/OE trajectory can be shown in dollars (physical × unit_value). Off by
+   * default; physical units otherwise. The toggle is only offered when
+   * `unitValueSummary.single` is defined.
+   */
+  private dollarScaled = false;
+
   private active = false;
 
   /** Phase 9 scenario tray — owned by main.ts (for save/load); rendered here. */
@@ -174,6 +183,24 @@ export class Layer3Panel {
   setTray(tray: ScenarioTray): void {
     this.tray = tray;
     this.renderTray();
+  }
+
+  /**
+   * Loom spec item 9 — re-render the provenance-driven sections (time-unit
+   * caption, dollar toggle, unclassified banner) after a tioeClass override
+   * changes the attached provenance, without rebuilding the whole panel.
+   */
+  refreshProvenance(): void {
+    const controls = this.host.querySelector<HTMLElement>('[data-role="provenance-controls"]');
+    if (controls) {
+      const next = this.renderProvenanceControls();
+      controls.replaceWith(next);
+    }
+    const banner = this.host.querySelector<HTMLElement>('[data-role="provenance-banner"]');
+    if (banner) {
+      banner.replaceWith(this.renderProvenanceBanner());
+    }
+    this.renderTrajectory();
   }
 
   /** Select a different intervention node. */
@@ -231,6 +258,8 @@ export class Layer3Panel {
     this.host.innerHTML = "";
     this.host.append(this.renderHeader());
     this.host.append(this.renderControls());
+    this.host.append(this.renderProvenanceControls());
+    this.host.append(this.renderProvenanceBanner());
     this.host.append(this.renderSparklines());
     this.host.append(this.renderTrayHost());
     this.renderTray();
@@ -627,6 +656,110 @@ export class Layer3Panel {
     return wrap;
   }
 
+  /**
+   * Loom spec items 3 & 4 — the real-time-unit caption (from
+   * `graph.provenance.timeUnit`) and the dollar-scaling toggle (when a shared
+   * `unit_value` is present). Both are conditional on sidecar provenance; with
+   * no sidecar nothing renders here and Layer 3 looks exactly as before.
+   */
+  private renderProvenanceControls(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "layer3-provenance";
+    wrap.dataset.role = "provenance-controls";
+    const timeUnit = this.graph.provenance?.timeUnit;
+    if (timeUnit) {
+      const cap = document.createElement("p");
+      cap.className = "layer3-caption layer3-timeunit";
+      cap.dataset.role = "time-unit";
+      cap.textContent = `Time unit: ${timeUnit}`;
+      wrap.append(cap);
+    }
+    const summary = unitValueSummary(this.graph);
+    if (summary.single !== undefined) {
+      const row = document.createElement("div");
+      row.className = "layer3-control layer3-unitscale";
+      const label = document.createElement("span");
+      label.textContent = "Display";
+      const group = document.createElement("div");
+      group.className = "layer3-unitscale-group";
+      (["physical", "dollars"] as const).forEach((u) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.dataset.unit = u;
+        btn.textContent = u === "dollars" ? "$ (unit_value)" : "Physical";
+        btn.classList.toggle("is-selected", u === "physical" ? !this.dollarScaled : this.dollarScaled);
+        btn.addEventListener("click", () => {
+          this.dollarScaled = u === "dollars";
+          group
+            .querySelectorAll("button")
+            .forEach((b) => b.classList.toggle("is-selected", b.dataset.unit === (this.dollarScaled ? "dollars" : "physical")));
+          this.renderTrajectory();
+        });
+        group.append(btn);
+      });
+      row.append(label, group);
+      wrap.append(row);
+      if (summary.withoutUnit > 0) {
+        const note = document.createElement("p");
+        note.className = "layer3-caption layer3-unitscale-note";
+        note.textContent = `${summary.withoutUnit} node${summary.withoutUnit > 1 ? "s lack" : " lacks"} unit_value — shown in physical units.`;
+        wrap.append(note);
+      }
+    } else if (summary.present) {
+      const note = document.createElement("p");
+      note.className = "layer3-caption layer3-unitscale-note";
+      note.textContent = "Nodes carry differing unit_values; aggregate shown in physical units.";
+      wrap.append(note);
+    }
+    return wrap;
+  }
+
+  /**
+   * Loom spec item 7 — the "N nodes unclassified — suggestions available"
+   * nudge, shown only when a `tioe_suggestions.md` sidecar is present and at
+   * least one node is unclassified. Clicking reveals the suggestions text
+   * inline (the same evidence a person would otherwise find in the file).
+   */
+  private renderProvenanceBanner(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "layer3-provenance-banner";
+    wrap.dataset.role = "provenance-banner";
+    const gp = this.graph.provenance;
+    const count = gp?.unclassifiedCount ?? 0;
+    if (!gp?.hasSuggestions || count === 0) return wrap;
+    const badge = document.createElement("button");
+    badge.type = "button";
+    badge.className = "layer3-unclassified-badge";
+    badge.dataset.role = "unclassified-nudge";
+    badge.textContent = `${count} node${count > 1 ? "s" : ""} unclassified \u2014 suggestions available`;
+    const detail = document.createElement("div");
+    detail.className = "layer3-unclassified-detail";
+    detail.dataset.role = "unclassified-detail";
+    detail.hidden = true;
+    if (gp.tioeSuggestionsMd) {
+      const pre = document.createElement("pre");
+      pre.textContent = gp.tioeSuggestionsMd;
+      detail.append(pre);
+    }
+    badge.addEventListener("click", () => {
+      detail.hidden = !detail.hidden;
+      badge.classList.toggle("is-open", !detail.hidden);
+    });
+    wrap.append(badge, detail);
+    return wrap;
+  }
+
+  /** Scale a physical T/I/OE series into dollars when dollar scaling is active
+   * and a single shared unit_value exists. Pure view projection over the
+   * engine output (Loom spec item 4). */
+  private maybeScale(series: { T: number; I: number; OE: number }[]): { T: number; I: number; OE: number }[] {
+    if (!this.dollarScaled) return series;
+    const summary = unitValueSummary(this.graph);
+    const uv = summary.single;
+    if (uv === undefined) return series;
+    return series.map((s) => scaleTioeSnapshot(s, uv));
+  }
+
   // --- trajectory --------------------------------------------------------
 
   private renderTrajectory(): void {
@@ -666,7 +799,9 @@ export class Layer3Panel {
       { dt: this.dt, method: this.method },
       this.steps,
     );
-    for (const meta of TIOE_META) wrap.append(this.renderOneSparkline(result.pre, result.post, meta));
+    const pre = this.maybeScale(result.pre);
+    const post = this.maybeScale(result.post);
+    for (const meta of TIOE_META) wrap.append(this.renderOneSparkline(pre, post, meta));
     wrap.append(this.renderTierRow(result));
     wrap.append(this.renderSignatureRow(result));
     wrap.append(this.renderRatiosRow(result));
@@ -682,8 +817,10 @@ export class Layer3Panel {
       integrator: { dt: this.dt, method: this.method },
       steps: this.steps,
     });
+    const pre = this.maybeScale(result.pre.series);
+    const post = this.maybeScale(result.post.series);
     for (const meta of TIOE_META) {
-      wrap.append(this.renderOneSparkline(result.pre.series, result.post.series, meta));
+      wrap.append(this.renderOneSparkline(pre, post, meta));
     }
   }
 
