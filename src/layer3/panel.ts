@@ -214,6 +214,25 @@ export class Layer3Panel {
   }
 
   /**
+   * Called after a new graph is loaded in place (model upload / session load).
+   * Accepts the reset weights, clears user-selection lock, rebuilds the node
+   * dropdown options from the new graph.nodes, re-derives the default
+   * intervention node from the top constraint, and re-renders.
+   */
+  resetForNewGraph(w: Weights): void {
+    this.weights = { ...w };
+    this.userSelectedNode = false;
+    const top = topConstraints(this.graph, this.weights)[0];
+    this.nodeId = top?.nodeId ?? this.graph.nodes[0]?.id ?? "";
+    this.initRopeDefaults();
+    this.syncNodeSelect();
+    this.syncRopeSelects();
+    this.syncStructEdgeSelect();
+    this.clampMagnitudeToHeadroom();
+    this.renderTrajectory();
+  }
+
+  /**
    * Update the constraint weights and re-derive the default intervention node
    * from the Layer 2 top constraint. A manually chosen node is left alone.
    */
@@ -1190,7 +1209,57 @@ export class Layer3Panel {
 
   private syncNodeSelect(): void {
     const sel = this.host.querySelector<HTMLSelectElement>('[data-role="node-select"]');
-    if (sel) sel.value = this.nodeId;
+    if (!sel) return;
+    // Rebuild options so the list always reflects the current graph nodes (e.g.
+    // after a model upload replaces graph.nodes in place).
+    const currentIds = Array.from(sel.options).map((o) => o.value);
+    const graphIds = this.graph.nodes.map((n) => n.id);
+    const needsRebuild =
+      currentIds.length !== graphIds.length || currentIds.some((id, i) => id !== graphIds[i]);
+    if (needsRebuild) {
+      sel.innerHTML = "";
+      for (const n of this.graph.nodes) {
+        const opt = document.createElement("option");
+        opt.value = n.id;
+        opt.textContent = n.label;
+        sel.append(opt);
+      }
+    }
+    sel.value = this.nodeId;
+  }
+
+  private syncRopeSelects(): void {
+    for (const { role, getId } of [
+      { role: "rope-buffer", getId: () => this.rope.buffer },
+      { role: "rope-release", getId: () => this.rope.release },
+    ] as const) {
+      const sel = this.host.querySelector<HTMLSelectElement>(`[data-role="${role}"]`);
+      if (!sel) continue;
+      sel.innerHTML = "";
+      for (const n of this.graph.nodes) {
+        const opt = document.createElement("option");
+        opt.value = n.id;
+        opt.textContent = n.label;
+        sel.append(opt);
+      }
+      sel.value = getId();
+    }
+  }
+
+  private syncStructEdgeSelect(): void {
+    const sel = this.host.querySelector<HTMLSelectElement>('[data-role="struct-edge"]');
+    if (!sel) return;
+    sel.innerHTML = "";
+    for (const e of this.graph.edges) {
+      const opt = document.createElement("option");
+      opt.value = e.id;
+      const src = this.graph.nodes.find((n) => n.id === e.source)?.label ?? e.source;
+      const tgt = this.graph.nodes.find((n) => n.id === e.target)?.label ?? e.target;
+      opt.textContent = `${e.id}: ${src} → ${tgt}`;
+      sel.append(opt);
+    }
+    this.structEdgeId = this.graph.edges[0]?.id ?? "";
+    sel.value = this.structEdgeId;
   }
 
   /** Show/hide the rope/structural controls and apply button when the type or mode changes. */

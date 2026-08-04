@@ -438,7 +438,7 @@ function main(): void {
           scenarioTray = session.tray ?? emptyTray();
           l2.setWeights(weights);
           renderer.render(graph);
-          l3.setWeights(weights);
+          l3.resetForNewGraph(weights);
           l3.setTray(scenarioTray);
         })
         .catch((err: unknown) => {
@@ -493,7 +493,7 @@ function main(): void {
     l2.invalidate();
     l2.setWeights(weights);
     l2.setMigrationTrail(migrationTrail);
-    l3.setWeights(weights);
+    l3.resetForNewGraph(weights);
     l3.setTray(scenarioTray);
     abm.refresh();
     // Surface provenance presence + any non-fatal sidecar issues.
